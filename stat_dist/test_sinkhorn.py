@@ -7,7 +7,9 @@ https://github.com/dfdazac/wassdistance
 import torch
 from datetime import datetime
 
-from geomloss import SamplesLoss
+# FIXME , GeomLoss sinkhorn causes some error related to CUDA lib loading failure
+#   see this github issue for details https://github.com/mbaddar1/genmodel/issues/19
+# from geomloss import SamplesLoss
 from torch.utils.data import DataLoader
 
 from denoising_diffusion_pytorch.ddpm_sandbox.Trainer2 import Dataset2
@@ -27,11 +29,13 @@ logger = logging.getLogger()
 def sinkhorn_wrapper(X1: torch.Tensor, X2: torch.Tensor):
     logger.info(f"Starting sinkhorn calculations")
     start_timestamp = datetime.now()
-    # sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
-    # dist, P, C = sinkhorn(X1, X2)
-    with torch.no_grad():
-        loss = SamplesLoss("gaussian", blur=0.5)
-        dist = loss(X1, X2).item()
+    sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
+    dist, P, C = sinkhorn(X1, X2)
+    # FIXME , GeomLoss sinkhorn causes some error related to CUDA lib loading failure
+    #   see this github issue for details https://github.com/mbaddar1/genmodel/issues/19
+    # with torch.no_grad():
+    #     loss = SamplesLoss("gaussian", blur=0.5)
+    #     dist = loss(X1, X2).item()
     end_timestamp = datetime.now()
 
     # example
