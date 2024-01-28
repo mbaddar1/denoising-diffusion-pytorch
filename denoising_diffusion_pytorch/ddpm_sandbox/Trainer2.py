@@ -167,8 +167,15 @@ class Trainer2:
                     logger.info(f"Generating a sample for sinkhorn evaluation.")
                     generated_sample = self.diffusion_model.sample(batch_size=self.batch_size)
                     sh_dist_avg, sh_dist_std = self.sinkhorn_eval(generated_sample=generated_sample, num_iter=3)
-                    checkpoint_metadata = json.dumps({"ema_loss": ema_loss, "sinkhorn_dist_avg": sh_dist_avg,
-                                                      "sh_dist_std": sh_dist_std})
+                    # FIXME, there is redundancy in the metadata.
+                    #  Make a main meta data file and another per-iter metadata one
+                    checkpoint_metadata = json.dumps({"ema_loss": ema_loss,
+                                                      "sinkhorn_dist_avg": sh_dist_avg,
+                                                      "sinkhorn_dist_std": sh_dist_std,
+                                                      "train_num_iters": self.train_num_steps,
+                                                      "batch_size": self.batch_size,
+                                                      "data_shape": data.shape,
+                                                      "train_step": self.step})
                     checkpoint_metadata_filename = f"checkpoint_metadata_{self.step}.json"
                     with open(os.path.join(self.checkpoints_path, checkpoint_metadata_filename), "w") as f:
                         f.write(checkpoint_metadata)
@@ -256,7 +263,7 @@ if __name__ == '__main__':
     mnist_number = 8
     debug_flag = False
     pbar_update_freq = 100
-    checkpoint_freq = 1000
+    checkpoint_freq = 100
     assert num_train_step % checkpoint_freq == 0
     checkpoints_path = "../models/checkpoints/ddpm_mnist_8"
     # Test if cuda is available
@@ -265,6 +272,7 @@ if __name__ == '__main__':
     logger.info(f'Cuda device count = {torch.cuda.device_count()}')
     # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
     # UNet
+    # TODO save UNet and other metadata to files
     unet_model = Unet(
         dim=64,
         channels=num_channels,
