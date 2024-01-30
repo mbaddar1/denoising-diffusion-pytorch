@@ -1,6 +1,6 @@
 """
 This script is for testing diffusion models checkpoints, generated from this training script
-denoising-diffusion-pytorch/denoising_diffusion_pytorch/ddpm_sandbox/Trainer2.py
+denoising-diffusion-pytorch/denoising_diffusion_pytorch/ddpm_sandbox/ddpm_trainer.py
 and which are saved here
 denoising-diffusion-pytorch/denoising_diffusion_pytorch/models/checkpoints
 """
@@ -48,8 +48,8 @@ if __name__ == '__main__':
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../models/checkpoints/ddpm_mnist_8"
-    final_model_path = "../models/checkpoints/ddpm_mnist_8/checkpoint_model_10000.pt"
+    model_checkpoints_path = "../../models/checkpoints/ddpm_mnist_8"
+    final_model_path = "../../models/checkpoints/ddpm_mnist_8/checkpoint_model_10000.pt"
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')

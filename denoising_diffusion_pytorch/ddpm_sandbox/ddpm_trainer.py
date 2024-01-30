@@ -14,13 +14,13 @@ Running instructions :
 * After each run
 -----
 1. Document the results in the relevant issue
-2. Add quick piece of documentation in the PhD thesis with link to the GitHub issue. Write properly later
+2. Add a quick piece of documentation in the PhD thesis with link to the GitHub issue. Write properly later
 3. Save the log file as an attachment to the ticket
 """
 import json
 import os.path
 from typing import Tuple
-
+from sklearn.datasets import make_circles, make_swiss_roll, make_blobs
 import numpy as np
 from PIL import Image
 from denoising_diffusion_pytorch import GaussianDiffusion, Unet
@@ -32,7 +32,7 @@ from torchvision import transforms as T
 from torch.optim import Optimizer, Adam
 from tqdm import tqdm
 from datetime import datetime
-
+import torch
 from stat_dist.layers import SinkhornDistance
 
 # logger
@@ -41,38 +41,82 @@ logger = logging.getLogger()
 
 
 # similar to denoising_diffusion_pytorch.denoising_diffusion_pytorch.Dataset
-class Dataset2(Dataset):
+class CustomDataset(Dataset):
     EXTENSIONS = ['jpg', 'png']
+    DATASETS_NAMES = ["mnist", "mnist8", "mnist0", "circles", "swissroll", "blob"]
+    MIN_NUM_SAMPLES = 100
+    NUM_SAMPLES_PER_CALL_SKLEARN = 128
 
-    def __init__(self, folder: str, image_size: int, debug_flag: bool = False):
+    # can be considered as a batch. Why 128 ? as it is the first larger int after the default of 100
+
+    def __init__(self, dataset_name: str, debug_flag: bool = False, **kwargs):
+        """
+        data_source: str : can be path to data or the name of some ready-made dataset, like sklearn datasets
+        debug_flag : bool
+
+        """
         super().__init__()
+        self.dataset_name = dataset_name
         self.debug_flag = debug_flag
-        self.folder = folder
-        self.image_size = image_size
-        self.paths = [p for ext in Dataset2.EXTENSIONS for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-        # based on https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py#L838
-        self.transform = T.Compose([
-            T.Resize(image_size),
-            T.CenterCrop(image_size),
-            T.ToTensor()
-        ])
+        if dataset_name in ["mnist0", "mnist8"]:
+            self.image_size = kwargs.get("image_size", None)
+            self.data_dir = kwargs.get("data_dir", None)
+            assert self.image_size is not None, f"image size cannot be null with mnist dataset"
+            assert self.data_dir is not None, f"data dir cannot be None"
+            self.paths = [p for ext in CustomDataset.EXTENSIONS for p in Path(f'{self.data_dir}').glob(f'**/*.{ext}')]
+            assert len(self.paths) >= CustomDataset.MIN_NUM_SAMPLES, (f"Num of samples must be >= "
+                                                                      f"{CustomDataset.MIN_NUM_SAMPLES} , "
+                                                                      f"got {len(self.paths)} samples.")
+            # Transformation based on https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/
+            #   denoising_diffusion_pytorch/denoising_diffusion_pytorch.py#L838
+            self.transform = T.Compose([
+                T.Resize(self.image_size),
+                T.CenterCrop(self.image_size),
+                T.ToTensor()
+            ])
+        elif self.dataset_name in ["circles", "swissroll", "blob"]:
+            # FIXME, I dont think num-samples with sklearn datasets is meaningful !! , investigate
+            self.num_samples = kwargs["num_samples"]
+            assert self.num_samples >= CustomDataset.MIN_NUM_SAMPLES, (f"Num of samples must be >= "
+                                                                       f"{CustomDataset.MIN_NUM_SAMPLES} , "
+                                                                       f"got {len(self.paths)} samples.")
+        else:
+            raise ValueError(f"Unsupported datasource : {self.dataset_name}")
 
     def __len__(self):
-        return len(self.paths)
+        if self.dataset_name in ["mnist0", "mnist8"]:
+            return len(self.paths)
+        elif self.dataset_name in ["circles", "swissroll", "blob"]:
+            return self.num_samples
+        else:
+            raise ValueError(f"Unsupported datasource {self.dataset_name}")
 
     def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        # Line for learning purposes. Raw values are from 0 to 255.
-        #   See this post https://discuss.pytorch.org/t/pil-image-and-its-normalisation/78812/4?u=mbaddar
-        raw_img_data = np.array(img)  # FIXME for debugging only , remove later
-        if self.debug_flag:
-            old_level = logger.level
-            logger.setLevel(logging.DEBUG)
-            logger.debug(f"raw img data =\n {raw_img_data}")
-            logger.setLevel(old_level)
-        transformed_image = self.transform(img)
-        return transformed_image
+        if self.dataset_name in ["mnist0", "mnist8"]:
+            path = self.paths[index]
+            img = Image.open(path)
+            # Line for learning purposes. Raw values are from 0 to 255.
+            #   See this post https://discuss.pytorch.org/t/pil-image-and-its-normalisation/78812/4?u=mbaddar
+            raw_img_data = np.array(img)  # FIXME for debugging only , remove later
+            if self.debug_flag:
+                old_level = logger.level
+                logger.setLevel(logging.DEBUG)
+                logger.debug(f"raw img data =\n {raw_img_data}")
+                logger.setLevel(old_level)
+            transformed_image = self.transform(img)
+            return transformed_image
+        elif self.dataset_name in ["circles", "swissroll", "blob"]:
+            if self.dataset_name == "circles":
+                data_, _ = make_circles(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN)
+            elif self.dataset_name == "swissroll":
+                data_, _ = make_swiss_roll(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN)
+            elif self.dataset_name == "blobs":
+                data_, _ = make_blobs(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN)
+            else:
+                raise ValueError(f"dataset_name {self.dataset_name} is not supported")
+            return torch.tensor(data_)
+        else:
+            raise ValueError(f"Unsupported datasource {self.dataset_name}")
 
         # TODO Some coding notes (nothing todo, just for highlighting) :
         # --------------------
@@ -251,8 +295,38 @@ def set_sinkhorn_baseline(dataset: Dataset, batch_size: int, device: torch.devic
     return dist_avg, dist_std
 
 
+def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
+    folder_path = None
+    if dataset_name in ["mnist0", "mnist8"]:
+        mnist_samples_path = kwargs["mnist_path"]
+        img_size = kwargs["img_size"]
+        if dataset_name == "mnist0":
+            mnist_num = 0
+        elif dataset_name == "mnist8":
+            mnist_num = 8
+        else:
+            raise ValueError(f"Unknown dataset name {dataset_name}")
+
+        folder_path = os.path.join(mnist_samples_path, str(mnist_num))
+        dataset_ = CustomDataset(dataset_name=folder_path, image_size=img_size)
+        return dataset_
+    elif dataset_name in ["circles", "swissroll", "blobs"]:
+        folder_path = dataset_name
+        dataset_ = CustomDataset(dataset_name=folder_path)
+    else:
+        raise ValueError(f"unsupported dataset name {dataset_name}")
+
+    mnist_samples_path = kwargs["mnist_path"]
+    img_size = kwargs["img_size"]
+
+
+pass
+
 if __name__ == '__main__':
     # Params and constants
+    model_name = "ddpm"
+    dataset_name = "mnist8"
+    checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
     device = torch.device('cuda')
     image_size = 32
@@ -265,7 +339,7 @@ if __name__ == '__main__':
     pbar_update_freq = 100
     checkpoint_freq = 100
     assert num_train_step % checkpoint_freq == 0
-    checkpoints_path = "../models/checkpoints/ddpm_mnist_8"
+    checkpoints_path = os.path.join(checkpoints_dir, dataset_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
@@ -296,9 +370,9 @@ if __name__ == '__main__':
     logger.info(f'Is diffusion model on cuda? : {is_diffusion_model_on_cuda}')
 
     # Dataset
-    logger.info("Setting up MNIST dataset")
+    logger.info("Setting up dataset")
     mnist_data_path = f"../mnist_image_samples/{mnist_number}"
-    mnist_dataset = Dataset2(folder=mnist_data_path, image_size=image_size)
+    mnist_dataset = CustomDataset(dataset_name=mnist_data_path, image_size=image_size)
     # set sinkhorn baseline
     sh_baseline_dist_avg, sh_baseline_dist_std = (
         set_sinkhorn_baseline(dataset=mnist_dataset, batch_size=batch_size, device=device))
