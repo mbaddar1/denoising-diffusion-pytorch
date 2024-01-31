@@ -12,7 +12,7 @@ from datetime import datetime
 # from geomloss import SamplesLoss
 from torch.utils.data import DataLoader
 
-from denoising_diffusion_pytorch.ddpm_sandbox.Trainer2 import Dataset2
+from denoising_diffusion_pytorch.ddpm_sandbox.ddpm_trainer import CustomDataset
 # from sinkhorn import sinkhorn
 from layers import SinkhornDistance
 from sklearn import datasets
@@ -54,11 +54,11 @@ if __name__ == '__main__':
                            T.CenterCrop(img_size),
                            T.ToTensor()])
 
-    mnist_0_dataset = Dataset2(
-        folder="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0",
+    mnist_0_dataset = CustomDataset(
+        dataset_name="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0",
         image_size=img_size)
-    mnist_8_dataset = Dataset2(
-        folder="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8",
+    mnist_8_dataset = CustomDataset(
+        dataset_name="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8",
         image_size=img_size)
     mnist_0_dl = DataLoader(dataset=mnist_0_dataset, batch_size=batch_size, shuffle=True)
     mnist_8_dl = DataLoader(dataset=mnist_8_dataset, batch_size=batch_size, shuffle=True)

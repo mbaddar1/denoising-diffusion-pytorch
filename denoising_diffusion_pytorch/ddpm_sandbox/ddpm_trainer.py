@@ -20,7 +20,7 @@ Running instructions :
 import json
 import os.path
 from typing import Tuple
-from sklearn.datasets import make_circles, make_swiss_roll, make_blobs
+from sklearn.datasets import make_circles, make_swiss_roll, make_blobs, make_moons
 import numpy as np
 from PIL import Image
 from denoising_diffusion_pytorch import GaussianDiffusion, Unet
@@ -43,7 +43,7 @@ logger = logging.getLogger()
 # similar to denoising_diffusion_pytorch.denoising_diffusion_pytorch.Dataset
 class CustomDataset(Dataset):
     EXTENSIONS = ['jpg', 'png']
-    DATASETS_NAMES = ["mnist", "mnist8", "mnist0", "circles", "swissroll", "blob"]
+    DATASETS_NAMES = ["mnist", "mnist8", "mnist0", "circles", "swissroll2d", "blobs", "moons"]
     MIN_NUM_SAMPLES = 100
     NUM_SAMPLES_PER_CALL_SKLEARN = 128
 
@@ -74,7 +74,7 @@ class CustomDataset(Dataset):
                 T.CenterCrop(self.image_size),
                 T.ToTensor()
             ])
-        elif self.dataset_name in ["circles", "swissroll", "blob"]:
+        elif self.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
             # FIXME, I dont think num-samples with sklearn datasets is meaningful !! , investigate
             self.num_samples = kwargs["num_samples"]
             assert self.num_samples >= CustomDataset.MIN_NUM_SAMPLES, (f"Num of samples must be >= "
@@ -86,7 +86,7 @@ class CustomDataset(Dataset):
     def __len__(self):
         if self.dataset_name in ["mnist0", "mnist8"]:
             return len(self.paths)
-        elif self.dataset_name in ["circles", "swissroll", "blob"]:
+        elif self.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
             return self.num_samples
         else:
             raise ValueError(f"Unsupported datasource {self.dataset_name}")
@@ -105,13 +105,24 @@ class CustomDataset(Dataset):
                 logger.setLevel(old_level)
             transformed_image = self.transform(img)
             return transformed_image
-        elif self.dataset_name in ["circles", "swissroll", "blob"]:
+        elif self.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
             if self.dataset_name == "circles":
-                data_, _ = make_circles(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN)
-            elif self.dataset_name == "swissroll":
-                data_, _ = make_swiss_roll(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN)
+                data_, _ = make_circles(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN,
+                                        shuffle=True, noise=0.05, factor=0.3)
+            elif self.dataset_name == "swissroll2d":
+                """
+                use the code line here
+                https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/blob/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics/diffusion_models.py#L10
+                To make a 2d swissroll as in here
+                https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/tree/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics
+                """
+                x, _ = make_swiss_roll(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN, noise=0.5)
+                data_ = x[:, [2, 0]] / 10.0 * np.array([1, -1])
             elif self.dataset_name == "blobs":
-                data_, _ = make_blobs(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN)
+                data_, _ = make_blobs(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN * 4,
+                                      centers=3, n_features=2, cluster_std=0.2, shuffle=True, random_state=0)
+            elif self.dataset_name == "moons":
+                data_, _ = make_moons(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN, shuffle=True, noise=0.05)
             else:
                 raise ValueError(f"dataset_name {self.dataset_name} is not supported")
             return torch.tensor(data_)
@@ -310,17 +321,13 @@ def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
         folder_path = os.path.join(mnist_samples_path, str(mnist_num))
         dataset_ = CustomDataset(dataset_name=folder_path, image_size=img_size)
         return dataset_
-    elif dataset_name in ["circles", "swissroll", "blobs"]:
+    elif dataset_name in ["circles", "swissroll2d", "blobs"]:
         folder_path = dataset_name
         dataset_ = CustomDataset(dataset_name=folder_path)
     else:
         raise ValueError(f"unsupported dataset name {dataset_name}")
+    return dataset_
 
-    mnist_samples_path = kwargs["mnist_path"]
-    img_size = kwargs["img_size"]
-
-
-pass
 
 if __name__ == '__main__':
     # Params and constants
