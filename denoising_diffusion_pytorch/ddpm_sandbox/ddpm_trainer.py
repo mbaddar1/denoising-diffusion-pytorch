@@ -332,8 +332,8 @@ def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
 if __name__ == '__main__':
     # Params and constants
     model_name = "ddpm"
-    dataset_name = "mnist8"
-    dataset_dir = f"../mnist_image_samples/8"
+    dataset_name = "mnist0"
+    dataset_dir = f"../mnist_image_samples/0"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
     device = torch.device('cuda')
@@ -342,7 +342,6 @@ if __name__ == '__main__':
     num_channels = 1
     batch_size = 64
     num_train_step = 10_000
-    mnist_number = 8
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
@@ -392,11 +391,8 @@ if __name__ == '__main__':
                           progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
                           checkpoints_path=checkpoints_path)
     trainer.train()
+    logger.info(f"Model training finished and the final model is the latest checkpoint ")
     logger.info(f"Saving the diffusion model...")
-    model_path = f"../models/diffusion_mnist_{mnist_number}_n_train_steps_{num_train_step}.pkl"
-    torch.save(diffusion.state_dict(), model_path)
-    logger.info(f"Successfully model saved to {model_path}")
-    logger.info(f"Training script finished")
 
     #######################
     """

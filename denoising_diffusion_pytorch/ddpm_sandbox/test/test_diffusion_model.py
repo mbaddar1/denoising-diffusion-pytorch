@@ -34,7 +34,7 @@ def tensor_to_images(images_tensor: torch.Tensor):
     prefix = "generated_img"
     for i, image_tensor in enumerate(images_tensors_list):
         img = Image.fromarray(image_tensor.detach().cpu().numpy()).convert("L")
-        img.save(f"{prefix}_{i}.png")
+        img.save(f"./generated_images/{prefix}_{i}.png")
 
 
 if __name__ == '__main__':
@@ -48,9 +48,9 @@ if __name__ == '__main__':
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../models/checkpoints/ddpm_mnist8"
+    model_checkpoints_path = "../models/checkpoints/ddpm_mnist0"
     final_model_checkpoint_name = "checkpoint_model_10000.pt"
-    final_model_path = os.path.join(model_checkpoints_path,final_model_checkpoint_name)
+    final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
