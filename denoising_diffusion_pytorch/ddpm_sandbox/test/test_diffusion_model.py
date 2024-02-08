@@ -48,7 +48,7 @@ if __name__ == '__main__':
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../models/checkpoints/ddpm_mnist0"
+    model_checkpoints_path = "../models/checkpoints/ddpm_mnist8"
     final_model_checkpoint_name = "checkpoint_model_10000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
