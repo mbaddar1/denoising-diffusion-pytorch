@@ -48,8 +48,9 @@ if __name__ == '__main__':
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../../models/checkpoints/ddpm_mnist_8"
-    final_model_path = "../../models/checkpoints/ddpm_mnist_8/checkpoint_model_10000.pt"
+    model_checkpoints_path = "../models/checkpoints/ddpm_mnist8"
+    final_model_checkpoint_name = "checkpoint_model_10000.pt"
+    final_model_path = os.path.join(model_checkpoints_path,final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
@@ -102,7 +103,7 @@ if __name__ == '__main__':
             meta_data = json.load(f)
             sinkhorn_distances.append(float(meta_data["sinkhorn_dist_avg"]))
             ema_losses.append(float(meta_data["ema_loss"]))
-            sinkhorn_std.append(float(meta_data["sh_dist_std"]))
+            sinkhorn_std.append(float(meta_data["sinkhorn_dist_std"]))
     fig, ax = plt.subplots()
     x = checkpoint_niters[plot_start_index:]
     y = [baseline_sinkhorn_value] * len(x)

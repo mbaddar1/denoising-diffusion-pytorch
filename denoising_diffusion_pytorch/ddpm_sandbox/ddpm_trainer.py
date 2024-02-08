@@ -141,7 +141,7 @@ class CustomDataset(Dataset):
         # As long as we have validated loaded data against passed num_channel and image size , it should be fine
 
 
-class Trainer2:
+class DDPmTrainer:
     def __init__(self, diffusion_model: GaussianDiffusion,
                  batch_size: int,
                  train_num_steps: int,
@@ -333,6 +333,7 @@ if __name__ == '__main__':
     # Params and constants
     model_name = "ddpm"
     dataset_name = "mnist8"
+    dataset_dir = f"../mnist_image_samples/8"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
     device = torch.device('cuda')
@@ -344,9 +345,11 @@ if __name__ == '__main__':
     mnist_number = 8
     debug_flag = False
     pbar_update_freq = 100
-    checkpoint_freq = 100
+    checkpoint_freq = 1000
     assert num_train_step % checkpoint_freq == 0
-    checkpoints_path = os.path.join(checkpoints_dir, dataset_name)
+    checkpoints_path = os.path.join(checkpoints_dir, f"{model_name}_{dataset_name}")
+    if not os.path.exists(checkpoints_path):
+        os.makedirs(checkpoints_path)
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
@@ -378,17 +381,16 @@ if __name__ == '__main__':
 
     # Dataset
     logger.info("Setting up dataset")
-    mnist_data_path = f"../mnist_image_samples/{mnist_number}"
-    mnist_dataset = CustomDataset(dataset_name=mnist_data_path, image_size=image_size)
+    dataset = CustomDataset(dataset_name=dataset_name, data_dir=dataset_dir, image_size=image_size)
     # set sinkhorn baseline
     sh_baseline_dist_avg, sh_baseline_dist_std = (
-        set_sinkhorn_baseline(dataset=mnist_dataset, batch_size=batch_size, device=device))
+        set_sinkhorn_baseline(dataset=dataset, batch_size=batch_size, device=device))
     # Trainer
     opt = Adam(params=diffusion.parameters(), lr=1e-4)
-    trainer = Trainer2(diffusion_model=diffusion, batch_size=batch_size, dataset=mnist_dataset, debug_flag=True,
-                       optimizer=opt, device=device, train_num_steps=num_train_step,
-                       progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
-                       checkpoints_path=checkpoints_path)
+    trainer = DDPmTrainer(diffusion_model=diffusion, batch_size=batch_size, dataset=dataset, debug_flag=True,
+                          optimizer=opt, device=device, train_num_steps=num_train_step,
+                          progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
+                          checkpoints_path=checkpoints_path)
     trainer.train()
     logger.info(f"Saving the diffusion model...")
     model_path = f"../models/diffusion_mnist_{mnist_number}_n_train_steps_{num_train_step}.pkl"
