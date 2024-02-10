@@ -43,7 +43,7 @@ logger = logging.getLogger()
 # similar to denoising_diffusion_pytorch.denoising_diffusion_pytorch.Dataset
 class CustomDataset(Dataset):
     EXTENSIONS = ['jpg', 'png']
-    DATASETS_NAMES = ["mnist", "mnist8", "mnist0", "circles", "swissroll2d", "blobs", "moons"]
+    SUPPORTED_DATASETS_NAMES = ["mnist", "mnist8", "mnist0", "circles", "swissroll2d", "blobs", "moons"]
     MIN_NUM_SAMPLES = 100
     NUM_SAMPLES_PER_CALL_SKLEARN = 128
 
@@ -146,7 +146,7 @@ class DDPmTrainer:
                  batch_size: int,
                  train_num_steps: int,
                  device: torch.device,
-                 dataset: Dataset,
+                 dataset: CustomDataset,
                  optimizer: Optimizer,
                  progress_bar_update_freq: int,
                  checkpoint_freq: int,
@@ -162,11 +162,12 @@ class DDPmTrainer:
         self.progress_bar_update_freq = progress_bar_update_freq
         self.checkpoints_path = checkpoints_path
         self.batch_size = batch_size
+        self.dataset = dataset
         #
         logger.info(f"Creating data loader for the dataset")
         # FIXME separate train and test datasets
-        self.train_dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
-        self.test_dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
+        self.train_dataloader = DataLoader(dataset=self.dataset, batch_size=batch_size, shuffle=True)
+        self.test_dataloader = DataLoader(dataset=self.dataset, batch_size=batch_size, shuffle=True)
         if self.debug_flag:
             self.__validate_dataset()  # FIXME remove later
 
@@ -262,44 +263,81 @@ class DDPmTrainer:
             logger.setLevel(logging.DEBUG)  # would it work ?
             logger.debug(f"Data batch # {i + 1} loaded with dimensions : {data.shape}")
             logger.debug(
-                f"For quantiles at levels {quantiles} = {torch.quantile(input=data, q=torch.tensor(quantiles))}")
+                f"For quantiles at levels {quantiles} = "
+                f"{torch.quantile(input=data, q=torch.tensor(quantiles, dtype=data.dtype))}")
             logger.setLevel(old_level)
-
-            # data should have dimension : batch, channels , height , width
+            # data should have dimension: batch, channels, height, width
             # height should be = width
-            assert self.diffusion_model.image_size == data.shape[2], \
-                "loaded data height must be equal to diffusion model image size property"
-            assert self.diffusion_model.image_size == data.shape[3], \
-                "loaded data width must be equal to diffusion model image size property"
+            dataset_name_attr = "dataset_name"
+
+            if not hasattr(dataset, dataset_name_attr):
+                raise ValueError(f"Dataset class instance must have property {dataset_name_attr}")
+            if dataset.dataset_name in ["mnist0", "mnist8"]:
+                assert self.diffusion_model.image_size == data.shape[2], \
+                    "loaded data height must be equal to diffusion model image size property"
+                assert self.diffusion_model.image_size == data.shape[3], \
+                    "loaded data width must be equal to diffusion model image size property"
+
+            elif dataset.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
+                assert self.diffusion_model.image_size is None, (" For sklearn datasets , image_size property in "
+                                                                 "diffusion model is useless and must be None")
 
 
-def set_sinkhorn_baseline(dataset: Dataset, batch_size: int, device: torch.device, num_iter=100) -> Tuple[float, float]:
+def set_sinkhorn_baseline(dataset: CustomDataset, batch_size: int, device: torch.device, num_iter=100) \
+        -> Tuple[float, float]:
     dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
     dist_list = []
+    sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
     for _ in tqdm(range(num_iter), desc="sinkhorn baseline calculations"):
         x1 = next(iter(dl)).to(device)
         x2 = next(iter(dl)).to(device)
-
         assert len(x1.shape) == len(x2.shape), "all batches must be of the same shape "  # might be a redundant check
         for j in range(len(x1.shape)):
             assert x1.shape[j] == x2.shape[j], f"shape{j} does not match between two samples"
-        # Assume batch sample is of shape B X C X H X W
-        assert len(x1.shape) == 4, "assume batch sample of shape B X C X H X W with len(shape)=4"
-        B = x1.shape[0]
-        C = x1.shape[1]
-        H = x1.shape[2]
-        W = x1.shape[3]
-        # Currently assume BW images, i.e. C = 1
-        assert C == 1, "Assume dimension C = 1 i.e. BW image"
-        x1_flat = x1.squeeze().reshape(B, H * W)
-        x2_flat = x2.squeeze().reshape(B, H * W)
-        assert len(x1_flat.shape) == 2, "first batch should have two dimensions after flattening"
-        assert len(x2_flat.shape) == 2, "second batch should have two dimensions after flattening"
-        norm_ = torch.norm(x1_flat - x2_flat).item()
-        assert norm_ > 0, "Two batches must be different but the norm of diff is zero"
-        sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
-        dist, P, C = sinkhorn(x1_flat, x2_flat)
-        dist_list.append(dist.item())
+        dataset_name_attr = "dataset_name"
+        if not hasattr(dataset, dataset_name_attr):
+            raise ValueError(f"Dataset class must have attribute {dataset_name_attr}")
+        if not (dataset.dataset_name in CustomDataset.SUPPORTED_DATASETS_NAMES):
+            raise ValueError(
+                f"Dataset name : {dataset_name} not in supported datasets : {CustomDataset.SUPPORTED_DATASETS_NAMES}")
+        # For image datasets batch sample must be of shape B X C X H X W
+
+        if dataset.dataset_name in ["mnist0", "mnist8"]:
+            assert len(x1.shape) == 4, "For image datasets  batch sample of shape B X C X H X W with len(shape)=4"
+            B = x1.shape[0]
+            C = x1.shape[1]
+            H = x1.shape[2]
+            W = x1.shape[3]
+            # Currently assume BW images, i.e. C = 1
+            assert C == 1, "Assume dimension C = 1 i.e. BW image"
+            x1_flat = x1.squeeze().reshape(B, H * W)
+            x2_flat = x2.squeeze().reshape(B, H * W)
+            assert len(x1_flat.shape) == 2, "first batch should have two dimensions after flattening"
+            assert len(x2_flat.shape) == 2, "second batch should have two dimensions after flattening"
+            norm_ = torch.norm(x1_flat - x2_flat).item()
+            assert norm_ > 0, "Two batches must be different but the norm of diff is zero"
+            dist, P, C = sinkhorn(x1_flat, x2_flat)
+            dist_list.append(dist.item())
+        elif dataset.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
+            """
+            for sklearn datasets the batches are of size B X N X D where:
+                B is the batch size
+                N is the number of samples generated per call to sklearn dataset function
+                D is the dimension of the dataset
+            We will use the batching feature in the sinkhorn implementation here (with modification from original)
+            denoising-diffusion-pytorch/stat_dist/layers.py:51
+            and here is the github ref (original impl.) 
+            https://github.com/dfdazac/wassdistance/blob/master/layers.py#L37
+            """
+            assert len(x1.shape) == 3, "For sklearn dataset , shape must be of len 3 : B X N X D"
+            dist, P, C = sinkhorn(x1, x2)  # apply batched sinkhorn calculations
+            assert len(dist.shape) == 1 and dist.shape[0] == x1.shape[0], \
+                (f"Batched distances must be of length equal to data-batch batch-size : "
+                 f"{dist.shape[0]} != {x1.shape[0]}")
+            dist_list.append(torch.mean(dist).item())
+        else:
+            raise ValueError(f"dataset_name : {dataset.dataset_name} is not supported")
+
     dist_avg = np.nanmean(dist_list)
     dist_std = np.std(dist_list)
     logger.info(f"Baseline sinkhorn average distance = {dist_avg}, and std = {dist_std}")
@@ -332,7 +370,7 @@ def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
 if __name__ == '__main__':
     # Params and constants
     model_name = "ddpm"
-    dataset_name = "mnist0"
+    dataset_name = "circles"
     dataset_dir = f"../mnist_image_samples/0"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
@@ -380,7 +418,7 @@ if __name__ == '__main__':
 
     # Dataset
     logger.info("Setting up dataset")
-    dataset = CustomDataset(dataset_name=dataset_name, data_dir=dataset_dir, image_size=image_size)
+    dataset = CustomDataset(dataset_name=dataset_name, num_samples=100)
     # set sinkhorn baseline
     sh_baseline_dist_avg, sh_baseline_dist_std = (
         set_sinkhorn_baseline(dataset=dataset, batch_size=batch_size, device=device))

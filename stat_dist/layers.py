@@ -1,10 +1,13 @@
+import logging
+
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-
 # Adapted from https://github.com/gpeyre/SinkhornAutoDiff
 # GitHub repo https://github.com/dfdazac/wassdistance/tree/master
+logger = logging.getLogger()
+
 
 class SinkhornDistance(nn.Module):
     r"""
@@ -44,13 +47,14 @@ class SinkhornDistance(nn.Module):
         C = self._cost_matrix(x, y)  # Wasserstein cost function
         x_points = x.shape[-2]
         y_points = y.shape[-2]
-        # adding extra dim check , based on the code line
+        # adding extra dim check, based on the code line
         # https://github.com/dfdazac/wassdistance/blob/master/layers.py#L34
         if x.dim() == 2:
+            logger.info(f"Dim = 2 and using direct sinkhorn calculations.\n")
             batch_size = 1
         elif x.dim() == 3:
-            # TODO add warning
             batch_size = x.shape[0]
+            logger.info(f"Dim = 3 and using batched sinkhorn calculation with first dimension as the batch size.\n")
         else:
             raise ValueError(f"data dim must be 2 or 3 . x and y shape is B X N X D where B is batch size, "
                              f"N is number of points for each "
