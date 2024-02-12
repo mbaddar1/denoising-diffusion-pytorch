@@ -23,7 +23,7 @@ from typing import Tuple
 from sklearn.datasets import make_circles, make_swiss_roll, make_blobs, make_moons
 import numpy as np
 from PIL import Image
-from denoising_diffusion_pytorch import GaussianDiffusion, Unet
+from denoising_diffusion_pytorch import GaussianDiffusion, Unet2D
 import torch
 import logging
 from torch.utils.data import Dataset, DataLoader
@@ -33,6 +33,8 @@ from torch.optim import Optimizer, Adam
 from tqdm import tqdm
 from datetime import datetime
 import torch
+
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import UnetGeneric
 from stat_dist.layers import SinkhornDistance
 
 # logger
@@ -370,8 +372,8 @@ def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
 if __name__ == '__main__':
     # Params and constants
     model_name = "ddpm"
-    dataset_name = "circles"
-    dataset_dir = f"../mnist_image_samples/0"
+    dataset_name = "mnist8"
+    dataset_dir = f"../mnist_image_samples/8"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
     device = torch.device('cuda')
@@ -379,7 +381,7 @@ if __name__ == '__main__':
     num_images = 1
     num_channels = 1
     batch_size = 64
-    num_train_step = 10_000
+    num_train_step = 5_000
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
@@ -394,7 +396,7 @@ if __name__ == '__main__':
     # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
     # UNet
     # TODO save UNet and other metadata to files
-    unet_model = Unet(
+    unet_model = UnetGeneric(
         dim=64,
         channels=num_channels,
         dim_mults=(1, 2, 4, 8),
@@ -418,7 +420,7 @@ if __name__ == '__main__':
 
     # Dataset
     logger.info("Setting up dataset")
-    dataset = CustomDataset(dataset_name=dataset_name, num_samples=100)
+    dataset = CustomDataset(dataset_name=dataset_name, image_size=image_size,data_dir=dataset_dir)
     # set sinkhorn baseline
     sh_baseline_dist_avg, sh_baseline_dist_std = (
         set_sinkhorn_baseline(dataset=dataset, batch_size=batch_size, device=device))

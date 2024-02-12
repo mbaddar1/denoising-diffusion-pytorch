@@ -1,7 +1,7 @@
 import logging
 import os.path
 
-from denoising_diffusion_pytorch import GaussianDiffusion, Unet
+from denoising_diffusion_pytorch import GaussianDiffusion, Unet2D
 import torch
 
 DEBUG_DATA_PATH = "data"
@@ -18,7 +18,7 @@ if __name__ == '__main__':
     num_images = 1
     num_channels = 1
 
-    model = Unet(
+    model = Unet2D(
         dim=64,
         channels=num_channels,
         dim_mults=(1, 2, 4, 8),

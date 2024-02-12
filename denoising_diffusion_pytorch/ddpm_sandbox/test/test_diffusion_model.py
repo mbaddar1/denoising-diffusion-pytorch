@@ -10,7 +10,7 @@ import os.path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from denoising_diffusion_pytorch import Unet, GaussianDiffusion
+from denoising_diffusion_pytorch import Unet2D, GaussianDiffusion
 import logging
 from PIL import Image
 from os import listdir
@@ -34,7 +34,9 @@ def tensor_to_images(images_tensor: torch.Tensor):
     prefix = "generated_img"
     for i, image_tensor in enumerate(images_tensors_list):
         img = Image.fromarray(image_tensor.detach().cpu().numpy()).convert("L")
-        img.save(f"./generated_images/{prefix}_{i}.png")
+        out_filename = f"./generated_images/{prefix}_{i}.png"
+        img.save(out_filename)
+        logger.info(f"Successfully written output file to {out_filename}")
 
 
 if __name__ == '__main__':
@@ -49,7 +51,7 @@ if __name__ == '__main__':
     checkpoint_metadata_ext = ".json"
 
     model_checkpoints_path = "../models/checkpoints/ddpm_mnist8"
-    final_model_checkpoint_name = "checkpoint_model_10000.pt"
+    final_model_checkpoint_name = "checkpoint_model_5000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
@@ -59,7 +61,7 @@ if __name__ == '__main__':
 
     logger.info(f"Creating UNet and Diffusion Models ")
     # UNet
-    unet_model = Unet(
+    unet_model = Unet2D(
         dim=64,
         channels=num_channels,
         dim_mults=(1, 2, 4, 8),
