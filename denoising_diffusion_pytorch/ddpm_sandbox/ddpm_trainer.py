@@ -33,8 +33,8 @@ from torch.optim import Optimizer, Adam
 from tqdm import tqdm
 from datetime import datetime
 import torch
-
-from denoising_diffusion_pytorch.denoising_diffusion_pytorch import UnetGeneric
+import shutil
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import FuncApproxNN
 from stat_dist.layers import SinkhornDistance
 
 # logger
@@ -45,7 +45,9 @@ logger = logging.getLogger()
 # similar to denoising_diffusion_pytorch.denoising_diffusion_pytorch.Dataset
 class CustomDataset(Dataset):
     EXTENSIONS = ['jpg', 'png']
-    SUPPORTED_DATASETS_NAMES = ["mnist", "mnist8", "mnist0", "circles", "swissroll2d", "blobs", "moons"]
+    MNIST_DATASET_NAMES = ["mnist8", "mnist0"]
+    SKLEARN_DATASET_NAMES = ["circles", "swissroll2d", "blobs", "moons"]
+    SUPPORTED_DATASETS_NAMES = MNIST_DATASET_NAMES + SKLEARN_DATASET_NAMES
     MIN_NUM_SAMPLES = 100
     NUM_SAMPLES_PER_CALL_SKLEARN = 128
 
@@ -94,7 +96,7 @@ class CustomDataset(Dataset):
             raise ValueError(f"Unsupported datasource {self.dataset_name}")
 
     def __getitem__(self, index):
-        if self.dataset_name in ["mnist0", "mnist8"]:
+        if self.dataset_name in CustomDataset.MNIST_DATASET_NAMES:
             path = self.paths[index]
             img = Image.open(path)
             # Line for learning purposes. Raw values are from 0 to 255.
@@ -107,13 +109,13 @@ class CustomDataset(Dataset):
                 logger.setLevel(old_level)
             transformed_image = self.transform(img)
             return transformed_image
-        elif self.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
+        elif self.dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
             if self.dataset_name == "circles":
                 data_, _ = make_circles(n_samples=CustomDataset.NUM_SAMPLES_PER_CALL_SKLEARN,
                                         shuffle=True, noise=0.05, factor=0.3)
             elif self.dataset_name == "swissroll2d":
                 """
-                use the code line here
+                used the code line here
                 https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/blob/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics/diffusion_models.py#L10
                 To make a 2d swissroll as in here
                 https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/tree/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics
@@ -207,6 +209,13 @@ class DDPmTrainer:
             while self.step <= self.train_num_steps:  # note the boundary condition
                 self.optimizer.zero_grad()
                 data = next(iter(self.train_dataloader)).to(device)
+                if len(data.shape) == 3 and self.dataset.dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
+                    # Batching happens already with each Dataset __get_item call.
+                    # Hence, the data is of the form B1 X B2 X D where B1 and B2 are two levels of batching:
+                    # Batches of Batches. Hence, we merge the two batches dim into one s.t. B = B1 X B2
+                    # See lines of code
+                    # denoising-diffusion-pytorch/denoising_diffusion_pytorch/ddpm_sandbox/ddpm_trainer.py:112
+                    data = data.reshape(data.shape[0] * data.shape[1], data.shape[2])
                 loss = self.diffusion_model(data)
                 if self.step == 0:
                     ema_loss = loss.item()
@@ -372,7 +381,15 @@ def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
 if __name__ == '__main__':
     # Params and constants
     model_name = "ddpm"
-    dataset_name = "mnist8"
+    dataset_name = "circles"
+    dataset_class = None  # set dataset_class based on dataset_name
+    if dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
+        dataset_class = "flat"
+    elif dataset_name in CustomDataset.MNIST_DATASET_NAMES:
+        dataset_class = "image"
+    else:
+        raise ValueError(f"Unsupported dataset_name : {dataset_name}. Must be one of "
+                         f"{CustomDataset.MNIST_DATASET_NAMES}, {CustomDataset.SKLEARN_DATASET_NAMES}")
     dataset_dir = f"../mnist_image_samples/8"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
@@ -380,15 +397,25 @@ if __name__ == '__main__':
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 64
+    batch_size = 1
     num_train_step = 5_000
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
+
+    # Some assertion for params
     assert num_train_step % checkpoint_freq == 0
     checkpoints_path = os.path.join(checkpoints_dir, f"{model_name}_{dataset_name}")
-    if not os.path.exists(checkpoints_path):
-        os.makedirs(checkpoints_path)
+    if dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
+        assert batch_size == 1, ("For sklearn datasets, batching happens already with each call for "
+                                 "__get_item in the Dataset class code."
+                                 "For simplicity, batch_size must be set to 1 for these datasets")
+    # Delete old checkpoint path , with contents , then create a new fresh one
+    logger.info(f"Removing checkpoint dir : {checkpoints_path} if exists")
+    shutil.rmtree(checkpoints_path, ignore_errors=True)
+    logger.info(f"Creating fresh checkpoint dir : {checkpoints_path}")
+    os.makedirs(checkpoints_path)
+
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
@@ -396,11 +423,10 @@ if __name__ == '__main__':
     # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
     # UNet
     # TODO save UNet and other metadata to files
-    unet_model = UnetGeneric(
-        dim=64,
-        channels=num_channels,
-        dim_mults=(1, 2, 4, 8),
-        flash_attn=True
+    unet_model = FuncApproxNN(
+        input_dim=2,
+        hidden_dim=256,
+        time_dim=64
     ).to(device)
 
     # Double-checking if models are actually on cuda
@@ -410,7 +436,8 @@ if __name__ == '__main__':
 
     diffusion = GaussianDiffusion(
         model=unet_model,
-        image_size=image_size,
+        dataset_class=dataset_class,
+        image_size=None,
         timesteps=time_steps,  # number of steps
         auto_normalize=False
     ).to(device)
@@ -420,7 +447,7 @@ if __name__ == '__main__':
 
     # Dataset
     logger.info("Setting up dataset")
-    dataset = CustomDataset(dataset_name=dataset_name, image_size=image_size,data_dir=dataset_dir)
+    dataset = CustomDataset(dataset_name=dataset_name, num_samples=1000)
     # set sinkhorn baseline
     sh_baseline_dist_avg, sh_baseline_dist_std = (
         set_sinkhorn_baseline(dataset=dataset, batch_size=batch_size, device=device))

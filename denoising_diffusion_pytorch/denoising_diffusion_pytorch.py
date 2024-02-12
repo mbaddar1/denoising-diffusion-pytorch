@@ -298,49 +298,51 @@ class Attention(nn.Module):
 
 
 # model
-class UnetGeneric(nn.Module):
+class FuncApproxNN(nn.Module):
     """
     A Generic UNet class that is not attached to image datasets
     """
 
     def __init__(
             self,
-            dim,
-            init_dim=None,
-            out_dim=None,
-            dim_mults=(1, 2, 4, 8),
-            channels=3,
+            hidden_dim: int,
+            input_dim: int,
+            time_dim: int,
+            # init_dim=None,
+            # out_dim=None,
+            # dim_mults=(1, 2, 4, 8),
+            # channels=3,
             self_condition=False,
-            resnet_block_groups=8,
-            learned_variance=False,
+            # resnet_block_groups=8,
+            # learned_variance=False,
             learned_sinusoidal_cond=False,
             random_fourier_features=False,
             learned_sinusoidal_dim=16,
-            sinusoidal_pos_emb_theta=10000,
-            attn_dim_head=32,
-            attn_heads=4,
-            full_attn=None,  # defaults to full attention only for inner most layer
-            flash_attn=False
+            sinusoidal_pos_emb_theta=10000
+            # attn_dim_head=32,
+            # attn_heads=4,
+            # full_attn=None,  # defaults to full attention only for inner most layer
+            # flash_attn=False
     ):
         super().__init__()
 
         # determine dimensions
 
-        self.channels = channels
+        # self.channels = channels
         self.self_condition = self_condition
-        input_channels = channels * (2 if self_condition else 1)
+        # input_channels = channels * (2 if self_condition else 1)
 
-        init_dim = default(init_dim, dim)
-        self.init_conv = nn.Conv2d(in_channels=input_channels, out_channels=init_dim, kernel_size=7, padding=3)
+        # init_dim = default(init_dim, dim)
+        # self.init_conv = nn.Conv2d(in_channels=input_channels, out_channels=init_dim, kernel_size=7, padding=3)
 
-        dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
-        in_out = list(zip(dims[:-1], dims[1:]))
+        # dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
+        # in_out = list(zip(dims[:-1], dims[1:]))
 
-        block_klass = partial(ResnetBlock, groups=resnet_block_groups)
+        # block_klass = partial(ResnetBlock, groups=resnet_block_groups)
 
         # time embeddings
 
-        time_dim = dim * 4
+        # time_dim = hidden_dim * 4
 
         self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
 
@@ -348,121 +350,128 @@ class UnetGeneric(nn.Module):
             sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
             fourier_dim = learned_sinusoidal_dim + 1
         else:
-            sinu_pos_emb = SinusoidalPosEmb(dim, theta=sinusoidal_pos_emb_theta)
-            fourier_dim = dim
+            sinu_pos_emb = SinusoidalPosEmb(hidden_dim, theta=sinusoidal_pos_emb_theta)
+            fourier_dim = hidden_dim
 
+        # Heuristic role
+        assert hidden_dim >= (input_dim + time_dim) * 2
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
             nn.Linear(fourier_dim, time_dim),
             nn.GELU(),
             nn.Linear(time_dim, time_dim)
         )
-
+        # simple fully connected neural network
+        self.fcn = nn.Sequential(nn.Linear(input_dim + time_dim, hidden_dim), nn.ReLU(),
+                                 nn.Linear(hidden_dim, input_dim))
         # attention
 
-        if not full_attn:
-            full_attn = (*((False,) * (len(dim_mults) - 1)), True)
-
-        num_stages = len(dim_mults)
-        full_attn = cast_tuple(full_attn, num_stages)
-        attn_heads = cast_tuple(attn_heads, num_stages)
-        attn_dim_head = cast_tuple(attn_dim_head, num_stages)
-
-        assert len(full_attn) == len(dim_mults)
-
-        FullAttention = partial(Attention, flash=flash_attn)
+        # if not full_attn:
+        #     full_attn = (*((False,) * (len(dim_mults) - 1)), True)
+        #
+        # num_stages = len(dim_mults)
+        # full_attn = cast_tuple(full_attn, num_stages)
+        # attn_heads = cast_tuple(attn_heads, num_stages)
+        # attn_dim_head = cast_tuple(attn_dim_head, num_stages)
+        #
+        # assert len(full_attn) == len(dim_mults)
+        #
+        # FullAttention = partial(Attention, flash=flash_attn)
 
         # layers
 
-        self.downs = nn.ModuleList([])
-        self.ups = nn.ModuleList([])
-        num_resolutions = len(in_out)
-
-        for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(
-                zip(in_out, full_attn, attn_heads, attn_dim_head)):
-            is_last = ind >= (num_resolutions - 1)
-
-            attn_klass = FullAttention if layer_full_attn else LinearAttention
-
-            self.downs.append(nn.ModuleList([
-                block_klass(dim_in, dim_in, time_emb_dim=time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim=time_dim),
-                attn_klass(dim_in, dim_head=layer_attn_dim_head, heads=layer_attn_heads),
-                Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding=1)
-            ]))
-
-        mid_dim = dims[-1]
-        self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim=time_dim)
-        self.mid_attn = FullAttention(mid_dim, heads=attn_heads[-1], dim_head=attn_dim_head[-1])
-        self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim=time_dim)
-
-        for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(
-                zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
-            is_last = ind == (len(in_out) - 1)
-
-            attn_klass = FullAttention if layer_full_attn else LinearAttention
-
-            self.ups.append(nn.ModuleList([
-                block_klass(dim_out + dim_in, dim_out, time_emb_dim=time_dim),
-                block_klass(dim_out + dim_in, dim_out, time_emb_dim=time_dim),
-                attn_klass(dim_out, dim_head=layer_attn_dim_head, heads=layer_attn_heads),
-                Upsample(dim_out, dim_in) if not is_last else nn.Conv2d(dim_out, dim_in, 3, padding=1)
-            ]))
-
-        default_out_dim = channels * (1 if not learned_variance else 2)
-        self.out_dim = default(out_dim, default_out_dim)
-
-        self.final_res_block = block_klass(dim * 2, dim, time_emb_dim=time_dim)
-        self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
+        # self.downs = nn.ModuleList([])
+        # self.ups = nn.ModuleList([])
+        # num_resolutions = len(in_out)
+        #
+        # for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(
+        #         zip(in_out, full_attn, attn_heads, attn_dim_head)):
+        #     is_last = ind >= (num_resolutions - 1)
+        #
+        #     attn_klass = FullAttention if layer_full_attn else LinearAttention
+        #
+        #     self.downs.append(nn.ModuleList([
+        #         block_klass(dim_in, dim_in, time_emb_dim=time_dim),
+        #         block_klass(dim_in, dim_in, time_emb_dim=time_dim),
+        #         attn_klass(dim_in, dim_head=layer_attn_dim_head, heads=layer_attn_heads),
+        #         Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding=1)
+        #     ]))
+        #
+        # mid_dim = dims[-1]
+        # self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim=time_dim)
+        # self.mid_attn = FullAttention(mid_dim, heads=attn_heads[-1], dim_head=attn_dim_head[-1])
+        # self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim=time_dim)
+        #
+        # for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(
+        #         zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
+        #     is_last = ind == (len(in_out) - 1)
+        #
+        #     attn_klass = FullAttention if layer_full_attn else LinearAttention
+        #
+        #     self.ups.append(nn.ModuleList([
+        #         block_klass(dim_out + dim_in, dim_out, time_emb_dim=time_dim),
+        #         block_klass(dim_out + dim_in, dim_out, time_emb_dim=time_dim),
+        #         attn_klass(dim_out, dim_head=layer_attn_dim_head, heads=layer_attn_heads),
+        #         Upsample(dim_out, dim_in) if not is_last else nn.Conv2d(dim_out, dim_in, 3, padding=1)
+        #     ]))
+        #
+        # default_out_dim = channels * (1 if not learned_variance else 2)
+        # self.out_dim = default(out_dim, default_out_dim)
+        #
+        # self.final_res_block = block_klass(dim * 2, dim, time_emb_dim=time_dim)
+        # self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     @property
     def downsample_factor(self):
         return 2 ** (len(self.downs) - 1)
 
     def forward(self, x, time, x_self_cond=None):
-        assert all([divisible_by(d, self.downsample_factor) for d in x.shape[
-                                                                     -2:]]), \
-            f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
-        if self.self_condition:
-            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
-            x = torch.cat((x_self_cond, x), dim=1)
-
-        x = self.init_conv(x)
-        r = x.clone()
-
+        # assert all([divisible_by(d, self.downsample_factor) for d in x.shape[
+        #                                                              -2:]]), \
+        #     f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
+        # if self.self_condition:
+        #     x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
+        #     x = torch.cat((x_self_cond, x), dim=1)
+        #
+        # x = self.init_conv(x)
+        # r = x.clone()
+        assert len(x.shape) == 2
         t = self.time_mlp(time)
+        x_aug = torch.cat([x, t], dim=0)
+        x_out = self.fcn(x_aug)
+        return x_out
 
-        h = []
-
-        for block1, block2, attn, downsample in self.downs:
-            x = block1(x, t)
-            h.append(x)
-
-            x = block2(x, t)
-            x = attn(x) + x
-            h.append(x)
-
-            x = downsample(x)
-
-        x = self.mid_block1(x, t)
-        x = self.mid_attn(x) + x
-        x = self.mid_block2(x, t)
-
-        for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
-            x = block1(x, t)
-
-            x = torch.cat((x, h.pop()), dim=1)
-            x = block2(x, t)
-            x = attn(x) + x
-
-            x = upsample(x)
-
-        x = torch.cat((x, r), dim=1)
-
-        x = self.final_res_block(x, t)
-        out_ = self.final_conv(x)  # For debugging
-        return out_
+        # h = []
+        #
+        # for block1, block2, attn, downsample in self.downs:
+        #     x = block1(x, t)
+        #     h.append(x)
+        #
+        #     x = block2(x, t)
+        #     x = attn(x) + x
+        #     h.append(x)
+        #
+        #     x = downsample(x)
+        #
+        # x = self.mid_block1(x, t)
+        # x = self.mid_attn(x) + x
+        # x = self.mid_block2(x, t)
+        #
+        # for block1, block2, attn, upsample in self.ups:
+        #     x = torch.cat((x, h.pop()), dim=1)
+        #     x = block1(x, t)
+        #
+        #     x = torch.cat((x, h.pop()), dim=1)
+        #     x = block2(x, t)
+        #     x = attn(x) + x
+        #
+        #     x = upsample(x)
+        #
+        # x = torch.cat((x, r), dim=1)
+        #
+        # x = self.final_res_block(x, t)
+        # out_ = self.final_conv(x)  # For debugging
+        # return out_
 
 
 class Unet2D(nn.Module):
@@ -687,11 +696,16 @@ def sigmoid_beta_schedule(timesteps, start=-3, end=3, tau=1, clamp_min=1e-5):
 
 
 class GaussianDiffusion(nn.Module):
+    SUPPORTED_DATASET_CLASSES = ["image", "flat"]
+
+    # image dataset is like mnist, cifar and batches are of the shape B X C X H X W
+    # Flat datasets are like sklearn datasets and the batches are of shape B X D
     def __init__(
             self,
             model,
             *,
-            image_size,
+            dataset_class: str,
+            image_size=None,
             timesteps=1000,
             sampling_timesteps=None,
             objective='pred_v',
@@ -704,20 +718,34 @@ class GaussianDiffusion(nn.Module):
             min_snr_gamma=5
     ):
         super().__init__()
-        assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
-        assert not model.random_or_learned_sinusoidal_cond
-
+        if hasattr(model, "channels"):
+            assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
+        else:
+            logger.info(
+                f"func. approx. model of class {type(model)} has no channels attribute, no assertions to be done")
+        if hasattr(model, "random_or_learned_sinusoidal_cond"):
+            assert not model.random_or_learned_sinusoidal_cond
+        else:
+            logger.info(f"func. approx. model of class {type(model)} has no "
+                        f"random_or_learned_sinusoidal_cond attribute, no assertions to be done")
+        assert dataset_class in GaussianDiffusion.SUPPORTED_DATASET_CLASSES
+        if dataset_class == "image":
+            assert image_size is not None
+        elif dataset_class == "flat":
+            assert image_size is None
+        else:
+            raise ValueError(f"Unsupported dataset class : {dataset_class}")
         self.model = model
-
-        self.channels = self.model.channels
-        self.self_condition = self.model.self_condition
-
+        self.dataset_class = dataset_class
+        self.channels = getattr(self.model, "channels", None)
+        self.self_condition = getattr(self.model, "self_condition", None)
         self.image_size = image_size
-
         self.objective = objective
-
         assert objective in {'pred_noise', 'pred_x0',
-                             'pred_v'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])'
+                             'pred_v'}, ('objective must be either pred_noise (predict noise) or '
+                                         'pred_x0 (predict image start) or pred_v (predict v '
+                                         '[v-parameterization as defined in appendix D of progressive '
+                                         'distillation paper, used in imagen-video successfully])')
 
         if beta_schedule == 'linear':
             beta_schedule_fn = linear_beta_schedule
@@ -1028,76 +1056,23 @@ class GaussianDiffusion(nn.Module):
         loss = loss * extract(self.loss_weight, t, loss.shape)
         return loss.mean()
 
-    def forward(self, img, *args, **kwargs):
-
-        b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
-        assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
-        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
-        img = self.normalize(img)
-        # print(torch.mean(img))
-        return self.p_losses(img, t, *args, **kwargs)
-
-
-# dataset classes
-
-class Dataset(Dataset):
-    def __init__(
-            self,
-            folder,
-            image_size,
-            exts=None,
-            augment_horizontal_flip=False,
-            convert_image_to=None
-    ):
-        super().__init__()
-        if exts is None:
-            exts = ['jpg', 'jpeg', 'png', 'tiff']
-        self.folder = folder
-        self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-
-        maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else nn.Identity()
-
-        # compare to the original transformation code
-        # https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py#L838
-        # ToTensor() converts PIL image, per channel, from 0-255 to 0-1 range
-        # https://pytorch.org/vision/stable/generated/torchvision.transforms.ToTensor.html
-        self.transform = T.Compose([
-            T.Resize(image_size),
-            T.ToTensor()
-        ])
-
-    # This function was not in the original ddpm code and created only for debugging purposes
-    # def validate_loaded_data(self):
-    #     for path in tqdm(self.paths, desc="validating loaded images"):
-    #         img = read_image(str(path))
-    #         assert len(img.shape) == 3
-    #         assert img.shape[0] == self.channels
-    #         assert img.shape[1] == img.shape[2] == self.image_size
-
-    def __len__(self):
-        return len(self.paths)
-
-    def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        # Line for learning purposes. Raw values are from 0 to 255.
-        #   See this post https://discuss.pytorch.org/t/pil-image-and-its-normalisation/78812/4?u=mbaddar
-        raw_img_data = np.array(img)
-
-        transformed_image = self.transform(img)
-        min_val = torch.min(transformed_image)
-        max_val = torch.max(transformed_image)
-        mean_val = torch.mean(transformed_image)
-        # val_hist = tor
-        # img = read_image(str(path))
-        # transformed_image = torch.squeeze(img)  # Just squeezing dims with value = 1 , no actual transformation
-        # Cannot do squeezing as code is designed to each image with channel, height and width : see this error
-        # File "/home/mbaddar/Documents/mbaddar/phd/genmodel/denoising-diffusion-pytorch/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py", line 854, in forward
-        #     b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
-        # ValueError: not enough values to unpack (expected 6, got 5)
-        # As long as we have validated loaded data against passed num_channel and image size , it should be fine
-        return transformed_image
+    def forward(self, x, *args, **kwargs):
+        if self.dataset_class == "image":
+            assert len(x.shape) == 4
+            b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
+            assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
+            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+            x_norm = self.normalize(x)
+            # print(torch.mean(img))
+            return self.p_losses(x_norm, t, *args, **kwargs)
+        elif self.dataset_class == "flat":
+            assert len(x.shape) == 2
+            b, d = x.shape[0], x.shape[1]
+            device = x.device
+            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+            return self.p_losses(x, t, *args, **kwargs)
+        else:
+            raise ValueError(f"Unsupported data_class : {self.dataset_class}")
 
 
 # trainer class
@@ -1272,13 +1247,9 @@ class Trainer(object):
     def train(self):
         accelerator = self.accelerator
         device = accelerator.device
-
         with tqdm(initial=self.step, total=self.train_num_steps, disable=not accelerator.is_main_process) as pbar:
-
             while self.step < self.train_num_steps:
-
                 total_loss = 0.
-
                 for _ in range(self.gradient_accumulate_every):
                     data = next(self.dl).to(device)
                     # Some data debugging info
