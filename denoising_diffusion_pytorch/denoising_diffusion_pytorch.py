@@ -730,9 +730,10 @@ class GaussianDiffusion(nn.Module):
                         f"random_or_learned_sinusoidal_cond attribute, no assertions to be done")
         assert dataset_class in GaussianDiffusion.SUPPORTED_DATASET_CLASSES
         if dataset_class == "image":
-            assert image_size is not None
+            assert image_size is not None, "for image datasets, image_size must not be None"
         elif dataset_class == "flat":
-            assert image_size is None
+            assert image_size is None, ("for flat (non-image) datasets, image size MUST be None."
+                                        "This can be be better later, for ex image_size can be an optional parameter")
         else:
             raise ValueError(f"Unsupported dataset class : {dataset_class}")
         self.model = model

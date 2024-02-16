@@ -74,6 +74,7 @@ if __name__ == '__main__':
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
 
     diffusion = GaussianDiffusion(
+        dataset_class="image",
         model=unet_model,
         image_size=image_size,
         timesteps=time_steps,  # number of steps

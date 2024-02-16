@@ -381,7 +381,7 @@ def get_dataset(dataset_name: str, **kwargs) -> torch.utils.data.Dataset:
 if __name__ == '__main__':
     # Params and constants
     model_name = "ddpm"
-    dataset_name = "circles"
+    dataset_name = "mnist8"
     dataset_class = None  # set dataset_class based on dataset_name
     if dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
         dataset_class = "flat"
@@ -397,7 +397,7 @@ if __name__ == '__main__':
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 1
+    batch_size = 64
     num_train_step = 5_000
     debug_flag = False
     pbar_update_freq = 100
@@ -406,11 +406,23 @@ if __name__ == '__main__':
     # Some assertion for params
     assert num_train_step % checkpoint_freq == 0
     checkpoints_path = os.path.join(checkpoints_dir, f"{model_name}_{dataset_name}")
+
+    # Check the consistency between batch_size and dataset_name
+    # For sklearn dataset, assert batch_size == 1. Why ? because each call to the sklearn dataset, like make_circles,
+    # already returns a batch. Such a call is inside the __get_item function dataset, and using a dataloader
+    # attached to the dataset, makes another level of batching using the next(iter(data_loader)) call.
+
     if dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
         assert batch_size == 1, ("For sklearn datasets, batching happens already with each call for "
                                  "__get_item in the Dataset class code."
                                  "For simplicity, batch_size must be set to 1 for these datasets")
-    # Delete old checkpoint path , with contents , then create a new fresh one
+    # For mnist dataset, use usual 2 pow X. Might be too restrictive
+    # TODO : Relax the batch_size conditions
+    elif dataset_name in CustomDataset.MNIST_DATASET_NAMES:
+        assert batch_size in [32, 64, 128, 256, 512, 1024], "batch size must be 2 pow x between 32 and 1024"
+    else:
+        raise ValueError(f"Unknown dataset_name = {dataset_name}")
+    # Delete an old checkpoint path, with contents, then create a new fresh one
     logger.info(f"Removing checkpoint dir : {checkpoints_path} if exists")
     shutil.rmtree(checkpoints_path, ignore_errors=True)
     logger.info(f"Creating fresh checkpoint dir : {checkpoints_path}")
@@ -421,23 +433,35 @@ if __name__ == '__main__':
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
     logger.info(f'Cuda device count = {torch.cuda.device_count()}')
     # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
-    # UNet
+    # DDPM step model: can any regression model
+
     # TODO save UNet and other metadata to files
-    unet_model = FuncApproxNN(
-        input_dim=2,
-        hidden_dim=256,
-        time_dim=64
-    ).to(device)
+    ddpm_step_model = None
+    if dataset_name in CustomDataset.SKLEARN_DATASET_NAMES:
+        ddpm_step_model = FuncApproxNN(
+            input_dim=2,
+            hidden_dim=256,
+            time_dim=64
+        ).to(device)
+    elif dataset_name in CustomDataset.MNIST_DATASET_NAMES:
+        ddpm_step_model = Unet2D(
+            dim=64,
+            channels=num_channels,
+            dim_mults=(1, 2, 4, 8),
+            flash_attn=True
+        ).to(device)
+    else:
+        raise ValueError(f"Unknown dataset_name : {dataset_name}")
 
     # Double-checking if models are actually on cuda
     #   https://discuss.pytorch.org/t/how-to-check-if-model-is-on-cuda/180/2
-    is_unet_model_on_cuda = next(unet_model.parameters()).is_cuda
+    is_unet_model_on_cuda = next(ddpm_step_model.parameters()).is_cuda
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
 
     diffusion = GaussianDiffusion(
-        model=unet_model,
+        model=ddpm_step_model,
         dataset_class=dataset_class,
-        image_size=None,
+        image_size=image_size,
         timesteps=time_steps,  # number of steps
         auto_normalize=False
     ).to(device)
@@ -447,7 +471,7 @@ if __name__ == '__main__':
 
     # Dataset
     logger.info("Setting up dataset")
-    dataset = CustomDataset(dataset_name=dataset_name, num_samples=1000)
+    dataset = CustomDataset(dataset_name=dataset_name, image_size=image_size, data_dir=dataset_dir)
     # set sinkhorn baseline
     sh_baseline_dist_avg, sh_baseline_dist_std = (
         set_sinkhorn_baseline(dataset=dataset, batch_size=batch_size, device=device))
