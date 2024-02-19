@@ -58,7 +58,6 @@ class ImageDataset(Dataset):
 
         """
         super().__init__()
-        self.dataset_name = dataset_name
         self.debug_flag = debug_flag
         self.image_size = image_size
         self.data_dir = data_dir
@@ -193,13 +192,6 @@ class DDPmTrainer:
             while self.step <= self.train_num_steps:  # note the boundary condition
                 self.optimizer.zero_grad()
                 data = self.get_next_data_batch()
-                if len(data.shape) == 3 and self.image_dataset.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-                    # Batching happens already with each Dataset __get_item call.
-                    # Hence, the data is of the form B1 X B2 X D where B1 and B2 are two levels of batching:
-                    # Batches of Batches. Hence, we merge the two batches dim into one s.t. B = B1 X B2
-                    # See lines of code
-                    # denoising-diffusion-pytorch/denoising_diffusion_pytorch/ddpm_sandbox/ddpm_trainer.py:112
-                    data = data.reshape(data.shape[0] * data.shape[1], data.shape[2])
                 loss = self.diffusion_model(data)
                 if self.step == 0:
                     ema_loss = loss.item()
@@ -243,6 +235,57 @@ class DDPmTrainer:
         elapsed_time = (end_datetime - start_timestamp).seconds
         logger.info(f"Training time = {elapsed_time} seconds")
 
+    def set_sinkhorn_baseline(self, num_iter=100, **kwargs) -> Tuple[float, float]:
+        distances_list = []
+        sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
+        for _ in tqdm(range(num_iter), desc="sinkhorn baseline calculations"):
+            x1 = self.get_next_data_batch()
+            x2 = self.get_next_data_batch()
+            assert len(x1.shape) == len(
+                x2.shape), "all batches must be of the same shape "  # might be a redundant check
+            for j in range(len(x1.shape)):
+                assert x1.shape[j] == x2.shape[j], f"shape{j} does not match between two samples"
+
+            if self.diffusion_model.dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+                assert len(x1.shape) == 4, "For image datasets  batch sample of shape B X C X H X W with len(shape)=4"
+                B = x1.shape[0]
+                C = x1.shape[1]
+                H = x1.shape[2]
+                W = x1.shape[3]
+                # Currently assume BW images, i.e. C = 1
+                assert C == 1, "Assume dimension C = 1 i.e. BW image"
+                x1_flat = x1.squeeze().reshape(B, H * W)
+                x2_flat = x2.squeeze().reshape(B, H * W)
+                assert len(x1_flat.shape) == 2, "first batch should have two dimensions after flattening"
+                assert len(x2_flat.shape) == 2, "second batch should have two dimensions after flattening"
+                norm_ = torch.norm(x1_flat - x2_flat).item()
+                assert norm_ > 0, "Two batches must be different but the norm of diff is zero"
+                dist, P, C = sinkhorn(x1_flat, x2_flat)
+                distances_list.append(dist.item())
+            elif self.diffusion_model.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+                """
+                for sklearn datasets the batches are of size B X D where:
+                    B is the batch size
+                    D is the dimension of the dataset
+                We will use the batching feature in the sinkhorn implementation here (with modification from original)
+                denoising-diffusion-pytorch/stat_dist/layers.py:51
+                and here is the github ref (original impl.) 
+                https://github.com/dfdazac/wassdistance/blob/master/layers.py#L37
+                """
+                assert len(x1.shape) == 2, "For sklearn dataset , shape must be of len 3 : B X D"
+                dist, P, C = sinkhorn(x1, x2)  # apply batched sinkhorn calculations
+                assert len(dist.shape) == 1 and dist.shape[0] == x1.shape[0], \
+                    (f"Batched distances must be of length equal to data-batch batch-size : "
+                     f"{dist.shape[0]} != {x1.shape[0]}")
+                distances_list.append(torch.mean(dist).item())
+            else:
+                raise ValueError(f"dataset_name : {self.diffusion_model.dataset_name} is not supported")
+
+        distances_avg = np.nanmean(distances_list)
+        distances_std = np.std(distances_list)
+        logger.info(f"Baseline sinkhorn average distance = {distances_avg}, and std = {distances_std}")
+        return distances_avg, distances_std
+
     # private method
     # https://www.geeksforgeeks.org/private-methods-in-python/
     def __validate_dataset(self):
@@ -267,77 +310,15 @@ class DDPmTrainer:
 
             if not hasattr(image_dataset, dataset_name_attr):
                 raise ValueError(f"Dataset class instance must have property {dataset_name_attr}")
-            if image_dataset.dataset_name in ["mnist0", "mnist8"]:
+            if self.diffusion_model.dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
                 assert self.diffusion_model.image_size == data.shape[2], \
                     "loaded data height must be equal to diffusion model image size property"
                 assert self.diffusion_model.image_size == data.shape[3], \
                     "loaded data width must be equal to diffusion model image size property"
 
-            elif image_dataset.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
+            elif self.diffusion_model.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
                 assert self.diffusion_model.image_size is None, (" For sklearn datasets , image_size property in "
                                                                  "diffusion model is useless and must be None")
-
-
-def set_sinkhorn_baseline(dataset: ImageDataset, batch_size: int, device: torch.device, num_iter=100) \
-        -> Tuple[float, float]:
-    dl = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
-    dist_list = []
-    sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
-    for _ in tqdm(range(num_iter), desc="sinkhorn baseline calculations"):
-        x1 = next(iter(dl)).to(device)
-        x2 = next(iter(dl)).to(device)
-        assert len(x1.shape) == len(x2.shape), "all batches must be of the same shape "  # might be a redundant check
-        for j in range(len(x1.shape)):
-            assert x1.shape[j] == x2.shape[j], f"shape{j} does not match between two samples"
-        dataset_name_attr = "dataset_name"
-        if not hasattr(dataset, dataset_name_attr):
-            raise ValueError(f"Dataset class must have attribute {dataset_name_attr}")
-        if not (
-                dataset.dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES + GaussianDiffusion.SKLEARN_DATASET_NAMES):
-            raise ValueError(
-                f"Dataset name : {dataset_name} not in supported datasets : {GaussianDiffusion.SUPPORTED_DATASETS_NAMES}")
-        # For image datasets batch sample must be of shape B X C X H X W
-
-        if dataset.dataset_name in ["mnist0", "mnist8"]:
-            assert len(x1.shape) == 4, "For image datasets  batch sample of shape B X C X H X W with len(shape)=4"
-            B = x1.shape[0]
-            C = x1.shape[1]
-            H = x1.shape[2]
-            W = x1.shape[3]
-            # Currently assume BW images, i.e. C = 1
-            assert C == 1, "Assume dimension C = 1 i.e. BW image"
-            x1_flat = x1.squeeze().reshape(B, H * W)
-            x2_flat = x2.squeeze().reshape(B, H * W)
-            assert len(x1_flat.shape) == 2, "first batch should have two dimensions after flattening"
-            assert len(x2_flat.shape) == 2, "second batch should have two dimensions after flattening"
-            norm_ = torch.norm(x1_flat - x2_flat).item()
-            assert norm_ > 0, "Two batches must be different but the norm of diff is zero"
-            dist, P, C = sinkhorn(x1_flat, x2_flat)
-            dist_list.append(dist.item())
-        elif dataset.dataset_name in ["circles", "swissroll2d", "blobs", "moons"]:
-            """
-            for sklearn datasets the batches are of size B X N X D where:
-                B is the batch size
-                N is the number of samples generated per call to sklearn dataset function
-                D is the dimension of the dataset
-            We will use the batching feature in the sinkhorn implementation here (with modification from original)
-            denoising-diffusion-pytorch/stat_dist/layers.py:51
-            and here is the github ref (original impl.) 
-            https://github.com/dfdazac/wassdistance/blob/master/layers.py#L37
-            """
-            assert len(x1.shape) == 3, "For sklearn dataset , shape must be of len 3 : B X N X D"
-            dist, P, C = sinkhorn(x1, x2)  # apply batched sinkhorn calculations
-            assert len(dist.shape) == 1 and dist.shape[0] == x1.shape[0], \
-                (f"Batched distances must be of length equal to data-batch batch-size : "
-                 f"{dist.shape[0]} != {x1.shape[0]}")
-            dist_list.append(torch.mean(dist).item())
-        else:
-            raise ValueError(f"dataset_name : {dataset.dataset_name} is not supported")
-
-    dist_avg = np.nanmean(dist_list)
-    dist_std = np.std(dist_list)
-    logger.info(f"Baseline sinkhorn average distance = {dist_avg}, and std = {dist_std}")
-    return dist_avg, dist_std
 
 
 if __name__ == '__main__':
@@ -357,11 +338,11 @@ if __name__ == '__main__':
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
-
+    unet_dim = 64
     # Some assertion for params
     assert num_train_step % checkpoint_freq == 0
     checkpoints_path = os.path.join(checkpoints_dir, f"{model_name}_{dataset_name}")
-
+    assert dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES + GaussianDiffusion.SKLEARN_DATASET_NAMES
     # Check the consistency between batch_size and dataset_name
     # For sklearn dataset, assert batch_size == 1. Why ? because each call to the sklearn dataset, like make_circles,
     # already returns a batch. Such a call is inside the __get_item function dataset, and using a dataloader
@@ -377,64 +358,53 @@ if __name__ == '__main__':
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
     logger.info(f'Cuda device count = {torch.cuda.device_count()}')
-    # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
-    # DDPM step model: can any regression model
 
-    # TODO save UNet and other metadata to files
+    diffusion_model = None
     ddpm_step_model = None
-    if dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        ddpm_step_model = FuncApproxNN(
-            input_dim=2,
-            hidden_dim=256,
-            time_dim=64
+    trainer = None
+    if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+        ddpm_step_model = Unet2D(dim=unet_dim,
+                                 channels=num_channels,
+                                 dim_mults=(1, 2, 4, 8),
+                                 flash_attn=True)
+        diffusion_model = GaussianDiffusion(
+            model=ddpm_step_model,
+            dataset_name=dataset_name,
+            image_size=image_size,
+            timesteps=time_steps,  # number of steps
+            auto_normalize=False
         ).to(device)
-    elif dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
-        ddpm_step_model = Unet2D(
-            dim=64,
-            channels=num_channels,
-            dim_mults=(1, 2, 4, 8),
-            flash_attn=True
-        ).to(device)
+        opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
+        image_dataset = ImageDataset(image_size=image_size,
+                                     data_dir=dataset_dir)
+        trainer = DDPmTrainer(diffusion_model=diffusion_model, image_dataset=image_dataset, batch_size=batch_size,
+                              train_num_steps=num_train_step, device=device, optimizer=opt,
+                              progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
+                              checkpoints_path=checkpoints_path, debug_flag=debug_flag)
+        sh_baseline_dist_avg, sh_baseline_dist_std = (
+            trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
+
+    elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+        ddpm_step_model = FuncApproxNN(hidden_dim=64, input_dim=2, time_dim=256).to(device)
+        diffusion_model = GaussianDiffusion(model=ddpm_step_model, dataset_name=dataset_name,
+                                            timesteps=time_steps).to(device)
+        opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
+        trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size, train_num_steps=num_train_step,
+                              device=device, optimizer=opt, progress_bar_update_freq=pbar_update_freq,
+                              checkpoint_freq=checkpoint_freq, checkpoints_path=checkpoints_path, debug_flag=debug_flag)
+        sh_baseline_dist_avg, sh_baseline_dist_std = (
+            trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
     else:
         raise ValueError(f"Unknown dataset_name : {dataset_name}")
-
-    # Double-checking if models are actually on cuda
+    # Check if models are on cuda actually
+    # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
+    # DDPM step model: can any regression model
+    # Double-check if models are actually on cuda
     #   https://discuss.pytorch.org/t/how-to-check-if-model-is-on-cuda/180/2
     is_unet_model_on_cuda = next(ddpm_step_model.parameters()).is_cuda
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
-
-    diffusion_model_image_size = image_size if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES else None
-
-    diffusion = GaussianDiffusion(
-        model=ddpm_step_model,
-        dataset_name=dataset_name,
-        image_size=diffusion_model_image_size,
-        timesteps=time_steps,  # number of steps
-        auto_normalize=False
-    ).to(device)
-
-    is_diffusion_model_on_cuda = next(diffusion.parameters()).is_cuda
+    is_diffusion_model_on_cuda = next(diffusion_model.parameters()).is_cuda
     logger.info(f'Is diffusion model on cuda? : {is_diffusion_model_on_cuda}')
-
-    # Dataset
-    logger.info("Setting up dataset")
-    image_dataset = None
-    if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
-        image_dataset = ImageDataset(image_size=image_size, data_dir=dataset_dir)
-    elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        image_dataset = None  # No need for an explicit dataset
-    else:
-        raise ValueError(f"Unknown dataset name {dataset_name}")
-    # set sinkhorn baseline
-    sh_baseline_dist_avg, sh_baseline_dist_std = (
-        set_sinkhorn_baseline(dataset=image_dataset, batch_size=batch_size, device=device))
-    # Trainer
-    opt = Adam(params=diffusion.parameters(), lr=1e-4)
-    trainer = DDPmTrainer(diffusion_model=diffusion, batch_size=batch_size, image_dataset=image_dataset,
-                          debug_flag=True,
-                          optimizer=opt, device=device, train_num_steps=num_train_step,
-                          progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
-                          checkpoints_path=checkpoints_path)
     trainer.train()
     logger.info(f"Model training finished and the final model is the latest checkpoint ")
     logger.info(f"Saving the diffusion model...")
