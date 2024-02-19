@@ -50,7 +50,7 @@ if __name__ == '__main__':
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../models/checkpoints/ddpm_mnist8"
+    model_checkpoints_path = "../models/checkpoints/ddpm_nn_mnist8"
     final_model_checkpoint_name = "checkpoint_model_5000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
@@ -74,7 +74,7 @@ if __name__ == '__main__':
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
 
     diffusion = GaussianDiffusion(
-        dataset_class="image",
+        dataset_name="mnist8",
         model=unet_model,
         image_size=image_size,
         timesteps=time_steps,  # number of steps

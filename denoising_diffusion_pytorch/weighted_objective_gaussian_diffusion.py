@@ -56,7 +56,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
 
         return model_mean, model_variance, model_log_variance
 
-    def p_losses(self, x_start, t, noise = None, clip_denoised = False):
+    def p_losses_images(self, x_start, t, noise = None, clip_denoised = False):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
