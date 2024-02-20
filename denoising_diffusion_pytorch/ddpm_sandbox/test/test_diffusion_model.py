@@ -16,27 +16,39 @@ from PIL import Image
 from os import listdir
 from os.path import isfile, join
 
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import FuncApproxNN
+
 # logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
-def tensor_to_images(images_tensor: torch.Tensor):
-    # Assume images of the shape is B X C X H X W where N is the number of images
-    assert len(images_tensor.shape) == 4, "Images tensor must have dims B X C X H X W"
-    # assert that C = 1, i.e. one channel and the image is BW
-    assert images_tensor.shape[1] == 1, "Supporting BW images only with one channel, i.e. dim C = 1"
-    images_tensor = torch.clamp(input=images_tensor, min=0, max=1) * 255.0
-    images_tensor = images_tensor.squeeze()
-    logger.info(
-        f"After clamping and reverse-normalizing , min and max = {torch.min(images_tensor)}, {torch.max(images_tensor)}")
-    images_tensors_list = list(images_tensor)
-    prefix = "generated_img"
-    for i, image_tensor in enumerate(images_tensors_list):
-        img = Image.fromarray(image_tensor.detach().cpu().numpy()).convert("L")
-        out_filename = f"./generated_images/{prefix}_{i}.png"
-        img.save(out_filename)
+def tensor_to_images(sample_tensor: torch.Tensor, dataset_name: str):
+    if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+        # Assume images of the shape is B X C X H X W where N is the number of images
+        assert len(sample_tensor.shape) == 4, "Images tensor must have dims B X C X H X W"
+        # assert that C = 1, i.e. one channel and the image is BW
+        assert sample_tensor.shape[1] == 1, "Supporting BW images only with one channel, i.e. dim C = 1"
+        sample_tensor = torch.clamp(input=sample_tensor, min=0, max=1) * 255.0
+        sample_tensor = sample_tensor.squeeze()
+        logger.info(
+            f"After clamping and reverse-normalizing , min and max = {torch.min(sample_tensor)}, {torch.max(sample_tensor)}")
+        images_tensors_list = list(sample_tensor)
+        prefix = "generated_img"
+        for i, image_tensor in enumerate(images_tensors_list):
+            img = Image.fromarray(image_tensor.detach().cpu().numpy()).convert("L")
+            out_filename = f"./generated_images/{dataset_name}_{prefix}_{i}.png"
+            img.save(out_filename)
+            logger.info(f"Successfully written output file to {out_filename}")
+    elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+        sample_tensor_np = sample_tensor.cpu().detach().numpy()
+        plt.clf()
+        plt.scatter(sample_tensor_np[:,0], sample_tensor_np[:,1])
+        out_filename = f"./generated_images/{dataset_name}.png"
+        plt.savefig(out_filename)
         logger.info(f"Successfully written output file to {out_filename}")
+    else:
+        raise ValueError(f"Unknown dataset_name : {dataset_name}")
 
 
 if __name__ == '__main__':
@@ -47,11 +59,12 @@ if __name__ == '__main__':
     num_channels = 1
     batch_size = 64
     # num_train_step = 20_000
+    dataset_name = "circles"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../models/checkpoints/ddpm_nn_mnist8"
-    final_model_checkpoint_name = "checkpoint_model_5000.pt"
+    model_checkpoints_path = "../models/checkpoints/ddpm_nn_circles"
+    final_model_checkpoint_name = "checkpoint_model_100000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
@@ -61,27 +74,34 @@ if __name__ == '__main__':
 
     logger.info(f"Creating UNet and Diffusion Models ")
     # UNet
-    unet_model = Unet2D(
-        dim=64,
-        channels=num_channels,
-        dim_mults=(1, 2, 4, 8),
-        flash_attn=True
-    ).to(device)
-
+    if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+        step_model = Unet2D(
+            dim=64,
+            channels=num_channels,
+            dim_mults=(1, 2, 4, 8),
+            flash_attn=True
+        ).to(device)
+        diffusion_model = GaussianDiffusion(
+            dataset_name="mnist8",
+            model=step_model,
+            image_size=image_size,
+            timesteps=time_steps,  # number of steps
+            auto_normalize=False
+        ).to(device)
+        sample_batch_size = 4
+    elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+        step_model = FuncApproxNN(hidden_dim=512, input_dim=2, time_dim=128).to(device)
+        diffusion_model = GaussianDiffusion(model=step_model, dataset_name=dataset_name,
+                                            timesteps=time_steps).to(device)
+        sample_batch_size = 1024
+    else:
+        raise ValueError(f"Unknown dataset_name : {dataset_name}")
     # Double-checking if models are actually on cuda
     #   https://discuss.pytorch.org/t/how-to-check-if-model-is-on-cuda/180/2
-    is_unet_model_on_cuda = next(unet_model.parameters()).is_cuda
+    is_unet_model_on_cuda = next(step_model.parameters()).is_cuda
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
 
-    diffusion = GaussianDiffusion(
-        dataset_name="mnist8",
-        model=unet_model,
-        image_size=image_size,
-        timesteps=time_steps,  # number of steps
-        auto_normalize=False
-    ).to(device)
-
-    is_diffusion_model_on_cuda = next(diffusion.parameters()).is_cuda
+    is_diffusion_model_on_cuda = next(diffusion_model.parameters()).is_cuda
     logger.info(f'Is diffusion model on cuda? : {is_diffusion_model_on_cuda}')
     #
     logger.info(f"Loading model checkpoints metadata from {model_checkpoints_path}")
@@ -96,7 +116,12 @@ if __name__ == '__main__':
     sinkhorn_distances = []
     sinkhorn_std = []
     plot_start_index = 1
-    baseline_sinkhorn_value = 40
+    if dataset_name == "mnist8":
+        baseline_sinkhorn_value = 40
+    elif dataset_name == "circles":
+        baseline_sinkhorn_value = 0.06
+    else:
+        raise ValueError(f"Still have no baseline sinkhorn distance for dataset_name = {dataset_name}")
     for iter_num in checkpoint_niters:
         tmp_list = one_metadata_filename.split(".")[0].split("_")[:2]
         tmp_list.append(str(iter_num))
@@ -134,14 +159,15 @@ if __name__ == '__main__':
 
     plt.savefig("iter_loss.png")
     logger.info(f"loading model weights from file {final_model_path}")
-    diffusion.load_state_dict(torch.load(final_model_path))
+    diffusion_model.load_state_dict(torch.load(final_model_path))
     logger.info(f"Successfully loaded model weights")
     #
     logger.info("Sampling images")
-    sampled_images = diffusion.sample(batch_size=4)
-    quantiles = [0.0, 0.25, 0.5, 0.75, 1.0]
-    logger.info(
-        f"quantiles of levels {quantiles} = {torch.quantile(input=sampled_images, q=torch.tensor(quantiles).to(device))}")
-    logger.info(f"Average of the sampled images {torch.mean(sampled_images)}")
-    tensor_to_images(images_tensor=sampled_images)
+    sampled_images = diffusion_model.sample(batch_size=sample_batch_size)
+    # FIXME No need now for this quantile analysis , remove it later
+    # quantiles = [0.0, 0.25, 0.5, 0.75, 1.0]
+    # logger.info(
+    #     f"quantiles of levels {quantiles} = {torch.quantile(input=sampled_images, q=torch.tensor(quantiles).to(device))}")
+    # logger.info(f"Average of the sampled images {torch.mean(sampled_images)}")
+    tensor_to_images(sample_tensor=sampled_images, dataset_name=dataset_name)
     logger.info("Testing script finished")

@@ -149,33 +149,54 @@ class DDPmTrainer:
             self.__validate_dataset()  # FIXME remove later
 
     def sinkhorn_eval(self, generated_sample: torch.Tensor, num_iter: int) -> Tuple[float, float]:
-        dist_list = []
-        assert len(generated_sample.shape) == 4
-        for _ in range(num_iter):
-            ref_sample = next(iter(self.test_dataloader)).to(self.device)
-            assert len(generated_sample.shape) == len(ref_sample.shape)
-            for j in range(len(generated_sample.shape)):
-                assert generated_sample.shape[j] == ref_sample.shape[j]
-            # shape assume to be B X C X H X W
-            B, C, H, W = (
-                generated_sample.shape[0], generated_sample.shape[1], generated_sample.shape[2],
-                generated_sample.shape[3])
-            assert C == 1, "Assume BW images"
-            generated_sample_flat = generated_sample.squeeze().reshape(B, H * W)
-            ref_sample_flat = ref_sample.squeeze().reshape(B, H * W)
-            sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=self.device)
-            dist, P, C = sinkhorn(generated_sample_flat, ref_sample_flat)
-            dist_list.append(dist.item())
-        return np.nanmean(dist_list), np.std(dist_list)
+
+        if self.diffusion_model.dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+            assert len(generated_sample.shape) == 4, f"For datasets : {GaussianDiffusion.MNIST_DATASET_NAMES}"
+            distances_list = []
+            for _ in range(num_iter):
+                ref_sample = self.get_next_data_batch()
+                assert len(generated_sample.shape) == len(ref_sample.shape)
+                for j in range(len(generated_sample.shape)):
+                    assert generated_sample.shape[j] == ref_sample.shape[j]
+                # shape assume to be B X C X H X W
+                B, C, H, W = (
+                    generated_sample.shape[0], generated_sample.shape[1], generated_sample.shape[2],
+                    generated_sample.shape[3])
+                assert C == 1, "Assume BW images"
+                generated_sample_flat = generated_sample.squeeze().reshape(B, H * W)
+                ref_sample_flat = ref_sample.squeeze().reshape(B, H * W)
+                sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=self.device)
+                dist, P, C = sinkhorn(generated_sample_flat, ref_sample_flat)
+                distances_list.append(dist.item())
+            return np.nanmean(distances_list), np.std(distances_list)
+        elif self.diffusion_model.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+            assert len(generated_sample.shape) == 2, f"For datasets : {GaussianDiffusion.SKLEARN_DATASET_NAMES}"
+            distances_list = []
+            for _ in range(num_iter):
+                ref_sample = self.get_next_data_batch()
+                assert len(generated_sample.shape) == len(ref_sample.shape)
+                for j in range(len(generated_sample.shape)):
+                    assert generated_sample.shape[j] == ref_sample.shape[j]
+                # shape assume to be B X D
+                sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=self.device)
+                distance, P, C = sinkhorn(generated_sample, ref_sample)
+                distances_list.append(distance.item())
+            return np.nanmean(distances_list), np.std(distances_list)
+        pass
 
     def get_next_data_batch(self):
         data_batch = None
         if self.diffusion_model.dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
             data_batch = next(iter(self.train_dataloader)).to(self.device)
         elif self.diffusion_model.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-            raise NotImplementedError()
+            if self.diffusion_model.dataset_name == "circles":
+                data_np, _ = make_circles(n_samples=self.batch_size, shuffle=True, noise=0.05, factor=0.3)
+            else:
+                raise ValueError(f"Unsupported dataset_name {self.diffusion_model.dataset_name}")
+            data_batch = torch.tensor(data=data_np, dtype=torch.float64).to(self.device)
         else:
             raise ValueError(f"dataset_name : {dataset_name} not supported")
+
         return data_batch
 
     def train(self):
@@ -260,8 +281,8 @@ class DDPmTrainer:
                 assert len(x2_flat.shape) == 2, "second batch should have two dimensions after flattening"
                 norm_ = torch.norm(x1_flat - x2_flat).item()
                 assert norm_ > 0, "Two batches must be different but the norm of diff is zero"
-                dist, P, C = sinkhorn(x1_flat, x2_flat)
-                distances_list.append(dist.item())
+                sinkhorn_distance, P, C = sinkhorn(x1_flat, x2_flat)
+                distances_list.append(sinkhorn_distance.item())
             elif self.diffusion_model.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
                 """
                 for sklearn datasets the batches are of size B X D where:
@@ -272,12 +293,14 @@ class DDPmTrainer:
                 and here is the github ref (original impl.) 
                 https://github.com/dfdazac/wassdistance/blob/master/layers.py#L37
                 """
-                assert len(x1.shape) == 2, "For sklearn dataset , shape must be of len 3 : B X D"
-                dist, P, C = sinkhorn(x1, x2)  # apply batched sinkhorn calculations
-                assert len(dist.shape) == 1 and dist.shape[0] == x1.shape[0], \
-                    (f"Batched distances must be of length equal to data-batch batch-size : "
-                     f"{dist.shape[0]} != {x1.shape[0]}")
-                distances_list.append(torch.mean(dist).item())
+                assert len(x1.shape) == 2, "For sklearn dataset , shape must be of len 2 : B X D"
+                sinkhorn_distance, P, C = sinkhorn(x1, x2)  # apply batched sinkhorn calculations
+                # FIXME, this assertion was needed when the sklearn dataset was batch, now it is not
+                # TODO remove the commented code later
+                # assert len(sinkhorn_distance.shape) == 1 and sinkhorn_distance.shape[0] == x1.shape[0], \
+                #     (f"Batched distances must be of length equal to data-batch batch-size : "
+                #      f"{sinkhorn_distance.shape[0]} != {x1.shape[0]}")
+                distances_list.append(sinkhorn_distance.item())
             else:
                 raise ValueError(f"dataset_name : {self.diffusion_model.dataset_name} is not supported")
 
@@ -325,7 +348,7 @@ if __name__ == '__main__':
     # Params and constants
     # Raw parameters
     model_name = "ddpm_nn"
-    dataset_name = "mnist8"
+    dataset_name = "circles"
     dataset_dir = f"../mnist_image_samples/8"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
@@ -334,10 +357,10 @@ if __name__ == '__main__':
     num_images = 1
     num_channels = 1
     batch_size = 64
-    num_train_step = 5_000
+    num_train_step = 100_000
     debug_flag = False
-    pbar_update_freq = 100
-    checkpoint_freq = 1000
+    pbar_update_freq = 1000
+    checkpoint_freq = 10_000
     unet_dim = 64
     # Some assertion for params
     assert num_train_step % checkpoint_freq == 0
@@ -385,7 +408,7 @@ if __name__ == '__main__':
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
 
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        ddpm_step_model = FuncApproxNN(hidden_dim=64, input_dim=2, time_dim=256).to(device)
+        ddpm_step_model = FuncApproxNN(hidden_dim=512, input_dim=2, time_dim=128).to(device)
         diffusion_model = GaussianDiffusion(model=ddpm_step_model, dataset_name=dataset_name,
                                             timesteps=time_steps).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)

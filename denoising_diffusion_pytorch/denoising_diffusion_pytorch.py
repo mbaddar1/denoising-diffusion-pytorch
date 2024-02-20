@@ -340,7 +340,7 @@ class FuncApproxNN(nn.Module):
             sinu_pos_emb = SinusoidalPosEmb(hidden_dim, theta=sinusoidal_pos_emb_theta)
             fourier_dim = hidden_dim
 
-        # Heuristic role
+        # Heuristic rule
         assert hidden_dim >= (input_dim + time_dim) * 2
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
@@ -358,15 +358,10 @@ class FuncApproxNN(nn.Module):
         return 2 ** (len(self.downs) - 1)
 
     def forward(self, x, time, x_self_cond=None):
-        # assert all([divisible_by(d, self.downsample_factor) for d in x.shape[
-        #                                                              -2:]]), \
-        #     f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
-        # if self.self_condition:
-        #     x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
-        #     x = torch.cat((x_self_cond, x), dim=1)
-        #
-        # x = self.init_conv(x)
-        # r = x.clone()
+        # We get this exception with sklearn dataset
+        # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and Double
+        # Making casting to float64 at this level to avoid upstream code modifications
+        x = x.double()
         assert len(x.shape) == 2
         t = self.time_mlp(time)
         x_aug = torch.cat([x, t], dim=1)
@@ -939,7 +934,7 @@ class GaussianDiffusion(nn.Module):
             sample_fn = self.p_sample_loop_img if not self.is_ddim_sampling else self.ddim_sample
             return sample_fn((batch_size, channels, image_size, image_size),
                              return_all_timesteps=return_all_timesteps)
-        elif self.dataset_name == GaussianDiffusion.SKLEARN_DATASET_NAMES:
+        elif self.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
             # This line might be redundant, but just to follow the existing code convention
             sample_fn = self.p_sample_loop_flat
             # FIXME, the 2 parameter must be passed as a parameter to the GaussianDiffusionModel
