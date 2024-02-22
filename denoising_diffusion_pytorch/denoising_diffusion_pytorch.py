@@ -307,66 +307,37 @@ class FuncApproxNN(nn.Module):
             self,
             hidden_dim: int,
             input_dim: int,
-            time_dim: int,
-            # init_dim=None,
-            # out_dim=None,
-            # dim_mults=(1, 2, 4, 8),
-            # channels=3,
-            self_condition=False,
-            # resnet_block_groups=8,
-            # learned_variance=False,
-            learned_sinusoidal_cond=False,
-            random_fourier_features=False,
-            learned_sinusoidal_dim=16,
-            sinusoidal_pos_emb_theta=10000
-            # attn_dim_head=32,
-            # attn_heads=4,
-            # full_attn=None,  # defaults to full attention only for inner most layer
-            # flash_attn=False
+            time_steps: int
     ):
         super().__init__()
+        self.time_steps = time_steps
+        # ----------------------------
+        # Impl. similar to the one in
+        #   https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/blob/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics/diffusion_models.py#L15
+        #   And the accompanying article is
+        # https://papers-100-lines.medium.com/diffusion-models-from-scratch-tutorial-in-100-lines-of-pytorch-code-5dac9f472f1c
+        self.models_list = torch.nn.ModuleList(
+            [torch.nn.Sequential(torch.nn.Linear(input_dim, hidden_dim, dtype=torch.float64),
+                                 torch.nn.Tanh(),
+                                 torch.nn.Linear(hidden_dim, hidden_dim, dtype=torch.float64),
+                                 torch.nn.Tanh(),
+                                 torch.nn.Linear(hidden_dim, input_dim, dtype=torch.float64)) for _ in
+             range(time_steps)])
 
-        # determine dimensions
-
-        # self.channels = channels
-        self.self_condition = self_condition
-
-        self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
-
-        if self.random_or_learned_sinusoidal_cond:
-            sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
-            fourier_dim = learned_sinusoidal_dim + 1
-        else:
-            sinu_pos_emb = SinusoidalPosEmb(hidden_dim, theta=sinusoidal_pos_emb_theta)
-            fourier_dim = hidden_dim
-
-        # Heuristic rule
-        assert hidden_dim >= (input_dim + time_dim) * 2
-        self.time_mlp = nn.Sequential(
-            sinu_pos_emb,
-            nn.Linear(fourier_dim, time_dim),
-            nn.GELU(),
-            nn.Linear(time_dim, time_dim)
-        )
-        # simple fully connected neural network
-        self.tensor_dtype = torch.float64
-        self.fcn = nn.Sequential(nn.Linear(input_dim + time_dim, hidden_dim, dtype=self.tensor_dtype), nn.ReLU(),
-                                 nn.Linear(hidden_dim, input_dim, dtype=self.tensor_dtype))
-
-    @property
-    def downsample_factor(self):
-        return 2 ** (len(self.downs) - 1)
-
-    def forward(self, x, time, x_self_cond=None):
-        # We get this exception with sklearn dataset
-        # RuntimeError: mat1 and mat2 must have the same dtype, but got Float and Double
-        # Making casting to float64 at this level to avoid upstream code modifications
+    def forward(self, x, t, self_cond=None):
+        # self_cond is a redundant parameter for compatibility
+        # Similar to Impl. in
+        # https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/blob/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics/diffusion_models.py#L26
+        # https://papers-100-lines.medium.com/diffusion-models-from-scratch-tutorial-in-100-lines-of-pytorch-code-5dac9f472f1c
         x = x.double()
         assert len(x.shape) == 2
-        t = self.time_mlp(time)
-        x_aug = torch.cat([x, t], dim=1)
-        x_out = self.fcn(x_aug)
-        return x_out
+        t_values = list(t.detach().cpu().numpy())
+        x_out_list = []
+        for i, t_val in enumerate(t_values):
+            x_out_single = self.models_list[t_val](x[i, :])
+            x_out_list.append(x_out_single)
+        x_out_tensor = torch.stack(x_out_list, dim=0)
+        return x_out_tensor
 
         # h = []
         #

@@ -64,7 +64,7 @@ if __name__ == '__main__':
     checkpoint_metadata_ext = ".json"
 
     model_checkpoints_path = "../models/checkpoints/ddpm_nn_circles"
-    final_model_checkpoint_name = "checkpoint_model_100000.pt"
+    final_model_checkpoint_name = "checkpoint_model_20000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
@@ -90,7 +90,7 @@ if __name__ == '__main__':
         ).to(device)
         sample_batch_size = 4
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        step_model = FuncApproxNN(hidden_dim=512, input_dim=2, time_dim=128).to(device)
+        step_model = FuncApproxNN(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
         diffusion_model = GaussianDiffusion(model=step_model, dataset_name=dataset_name,
                                             timesteps=time_steps).to(device)
         sample_batch_size = 1024

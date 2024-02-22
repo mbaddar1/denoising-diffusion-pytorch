@@ -357,10 +357,10 @@ if __name__ == '__main__':
     num_images = 1
     num_channels = 1
     batch_size = 64
-    num_train_step = 100_000
+    num_train_step = 20_000
     debug_flag = False
-    pbar_update_freq = 1000
-    checkpoint_freq = 10_000
+    pbar_update_freq = 100
+    checkpoint_freq = 1000
     unet_dim = 64
     # Some assertion for params
     assert num_train_step % checkpoint_freq == 0
@@ -408,7 +408,7 @@ if __name__ == '__main__':
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
 
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        ddpm_step_model = FuncApproxNN(hidden_dim=512, input_dim=2, time_dim=128).to(device)
+        ddpm_step_model = FuncApproxNN(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
         diffusion_model = GaussianDiffusion(model=ddpm_step_model, dataset_name=dataset_name,
                                             timesteps=time_steps).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
