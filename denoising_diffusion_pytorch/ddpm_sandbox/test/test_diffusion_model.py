@@ -59,11 +59,12 @@ if __name__ == '__main__':
     num_channels = 1
     batch_size = 64
     # num_train_step = 20_000
+    model_name = "ddpm_nn"
     dataset_name = "circles"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
-    model_checkpoints_path = "../models/checkpoints/ddpm_nn_circles"
+    model_checkpoints_path = f"../models/checkpoints/{model_name}_{dataset_name}"
     final_model_checkpoint_name = "checkpoint_model_20000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available

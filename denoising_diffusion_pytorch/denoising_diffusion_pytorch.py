@@ -316,13 +316,12 @@ class FuncApproxNN(nn.Module):
         #   https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/blob/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics/diffusion_models.py#L15
         #   And the accompanying article is
         # https://papers-100-lines.medium.com/diffusion-models-from-scratch-tutorial-in-100-lines-of-pytorch-code-5dac9f472f1c
-        self.models_list = torch.nn.ModuleList(
-            [torch.nn.Sequential(torch.nn.Linear(input_dim, hidden_dim, dtype=torch.float64),
-                                 torch.nn.Tanh(),
-                                 torch.nn.Linear(hidden_dim, hidden_dim, dtype=torch.float64),
-                                 torch.nn.Tanh(),
-                                 torch.nn.Linear(hidden_dim, input_dim, dtype=torch.float64)) for _ in
-             range(time_steps)])
+        self.network_head = nn.Sequential(nn.Linear(input_dim, hidden_dim, dtype=torch.float64), nn.ReLU(),
+                                          nn.Linear(hidden_dim, hidden_dim, dtype=torch.float64), nn.ReLU(), )
+        self.network_tail = nn.ModuleList([nn.Sequential(nn.Linear(hidden_dim, hidden_dim, dtype=torch.float64),
+                                                         nn.ReLU(),
+                                                         nn.Linear(hidden_dim, input_dim, dtype=torch.float64)
+                                                         ) for _ in range(time_steps)])
 
     def forward(self, x, t, self_cond=None):
         # self_cond is a redundant parameter for compatibility
@@ -333,8 +332,9 @@ class FuncApproxNN(nn.Module):
         assert len(x.shape) == 2
         t_values = list(t.detach().cpu().numpy())
         x_out_list = []
+        h = self.network_head(x)
         for i, t_val in enumerate(t_values):
-            x_out_single = self.models_list[t_val](x[i, :])
+            x_out_single = self.network_tail[t_val](h[i, :])
             x_out_list.append(x_out_single)
         x_out_tensor = torch.stack(x_out_list, dim=0)
         return x_out_tensor
