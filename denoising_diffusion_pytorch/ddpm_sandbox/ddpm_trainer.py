@@ -20,6 +20,8 @@ Running instructions :
 import json
 import os.path
 from typing import Tuple
+
+import matplotlib.pyplot as plt
 from sklearn.datasets import make_circles, make_swiss_roll, make_blobs, make_moons
 import numpy as np
 from PIL import Image
@@ -182,7 +184,6 @@ class DDPmTrainer:
                 distance, P, C = sinkhorn(generated_sample, ref_sample)
                 distances_list.append(distance.item())
             return np.nanmean(distances_list), np.std(distances_list)
-        pass
 
     def get_next_data_batch(self):
         data_batch = None
@@ -255,6 +256,66 @@ class DDPmTrainer:
         end_datetime = datetime.now()
         elapsed_time = (end_datetime - start_timestamp).seconds
         logger.info(f"Training time = {elapsed_time} seconds")
+
+    def forward_process_viz(self):
+        logger.info(f"Forward process Viz")
+        # Use this article as ref
+        # https://papers-100-lines.medium.com/diffusion-models-from-scratch-tutorial-in-100-lines-of-pytorch-code-5dac9f472f1c
+        start_sample_filename = f"{self.diffusion_model.dataset_name}_start.png"  # t0
+        midway_sample_filename = f"{self.diffusion_model.dataset_name}_middle.png"  # t_middle
+        end_sample_filename = f"{self.diffusion_model.dataset_name}_end.png"  # t_N
+        t_midway_int = int(self.diffusion_model.num_timesteps // 20)
+        IMG_MAX_PIXEL_VALUE = 255.0
+        # Midway point: close to start to see the original with some noise not actual midway
+        with torch.no_grad():
+            if self.diffusion_model.dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+                fw_process_dl = DataLoader(dataset=self.image_dataset, batch_size=1, shuffle=True)
+                x_start = next(iter(fw_process_dl)).to(self.device)
+                x_start_norm = self.diffusion_model.normalize(x_start)
+                t_midway_tensor = torch.tensor(t_midway_int, device=self.device).reshape(1, )
+                t_end_tensor = torch.tensor(self.diffusion_model.num_timesteps - 1).reshape(1, ).to(self.device)
+
+                # Forward process sampling
+                x_halfway = self.diffusion_model.q_sample(x_start=x_start_norm, t=t_midway_tensor)
+
+                # Clamping and Re-Scaling
+                x_end = self.diffusion_model.q_sample(x_start=x_start_norm, t=t_end_tensor)
+                x_start_norm = (x_start_norm.clamp(0, 1) * IMG_MAX_PIXEL_VALUE).squeeze()
+                x_halfway = (x_halfway.clamp(0, 1) * IMG_MAX_PIXEL_VALUE).type(torch.float).squeeze()
+                x_end = (x_end.clamp(0, 1) * IMG_MAX_PIXEL_VALUE).type(torch.float).squeeze()
+                # Create image objects
+
+                img_start = Image.fromarray(x_start_norm.detach().cpu().numpy()).convert("L")
+                img_halfway = Image.fromarray(x_halfway.detach().cpu().numpy()).convert("L")
+                img_end = Image.fromarray(x_end.detach().cpu().numpy()).convert("L")
+
+                # Save images
+                img_start.save(start_sample_filename)
+                img_halfway.save(midway_sample_filename)
+                img_end.save(end_sample_filename)
+
+            elif self.diffusion_model.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+                x_start = self.get_next_data_batch()
+                t_halfway = torch.tensor(
+                    np.repeat(t_midway_int, self.batch_size).reshape(-1, )).to(
+                    self.device)
+                t_end_tensor = torch.tensor(
+                    np.repeat(self.diffusion_model.num_timesteps - 1, self.batch_size).reshape(-1, )).to(self.device)
+                x_halfway = self.diffusion_model.q_sample(x_start=x_start, t=t_halfway)
+                x_end = self.diffusion_model.q_sample(x_start=x_start, t=t_end_tensor)
+                plt.scatter(x_start.cpu().detach().numpy()[:, 0], x_start.cpu().detach().numpy()[:, 1])
+                plt.savefig(start_sample_filename)
+
+                plt.clf()
+                plt.scatter(x_halfway.cpu().detach().numpy()[:, 0], x_halfway.cpu().detach().numpy()[:, 1])
+                plt.savefig(midway_sample_filename)
+
+                plt.clf()
+                plt.scatter(x_end.cpu().detach().numpy()[:, 0], x_end.cpu().detach().numpy()[:, 1])
+                plt.savefig(end_sample_filename)
+            else:
+                raise ValueError(f"Unknown dataset_name : {self.diffusion_model.dataset_name}")
+        logger.info(f"Forward process Viz finished")
 
     def set_sinkhorn_baseline(self, num_iter=100, **kwargs) -> Tuple[float, float]:
         distances_list = []
@@ -348,16 +409,24 @@ if __name__ == '__main__':
     # Params and constants
     # Raw parameters
     model_name = "ddpm_nn"
+
+    # dataset_name variables if dataset is mnist
+    mnist_num = "8"  # Can be None if we are going to use all mnist numbers
+    # dataset_name = f"mnist{mnist_num}"
+
+    # dataset_name for sklearn datasets
     dataset_name = "circles"
-    dataset_dir = f"../mnist_image_samples/8"
+
+    # needed only for actual, not synthetic datasets
+    dataset_dir = f"../mnist_image_samples/{mnist_num}"
     checkpoints_dir = f"../models/checkpoints"
     time_steps = 1000
     device = torch.device('cuda')
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 64
-    num_train_step = 20_000
+    batch_size = 1024
+    num_train_step = 5000
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
@@ -404,6 +473,7 @@ if __name__ == '__main__':
                               train_num_steps=num_train_step, device=device, optimizer=opt,
                               progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
                               checkpoints_path=checkpoints_path, debug_flag=debug_flag)
+        trainer.forward_process_viz()
         sh_baseline_dist_avg, sh_baseline_dist_std = (
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
 
@@ -415,6 +485,7 @@ if __name__ == '__main__':
         trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size, train_num_steps=num_train_step,
                               device=device, optimizer=opt, progress_bar_update_freq=pbar_update_freq,
                               checkpoint_freq=checkpoint_freq, checkpoints_path=checkpoints_path, debug_flag=debug_flag)
+        trainer.forward_process_viz()
         sh_baseline_dist_avg, sh_baseline_dist_std = (
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
     else:

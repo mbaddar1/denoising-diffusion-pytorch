@@ -594,7 +594,7 @@ def sigmoid_beta_schedule(timesteps, start=-3, end=3, tau=1, clamp_min=1e-5):
 
 
 class GaussianDiffusion(nn.Module):
-    MNIST_DATASET_NAMES = ["mnist8", "mnist0"]
+    MNIST_DATASET_NAMES = ["mnist8", "mnist0", "mnist6"]
     SKLEARN_DATASET_NAMES = ["circles", "swissroll2d", "blobs", "moons"]
 
     # image dataset is like mnist, cifar and batches are of the shape B X C X H X W
@@ -1045,6 +1045,9 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f"Unsupported dataset : {self.dataset_name}")
         return losses
+
+    def forward_process_viz(self):
+        pass
 
 
 # trainer class
