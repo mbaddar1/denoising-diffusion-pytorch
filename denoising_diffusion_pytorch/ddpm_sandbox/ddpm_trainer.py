@@ -36,7 +36,7 @@ from tqdm import tqdm
 from datetime import datetime
 import torch
 import shutil
-from denoising_diffusion_pytorch.denoising_diffusion_pytorch import FuncApproxNN
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import HeadTail
 from stat_dist.layers import SinkhornDistance
 
 # logger
@@ -406,39 +406,47 @@ class DDPmTrainer:
 
 
 if __name__ == '__main__':
-    # Params and constants
-    # Raw parameters
-    model_name = "ddpm_nn"
+    # Params
 
+    # This code part is for mnist dataset name
+    mnist_num = "6"  # Can be None if we are going to use all mnist numbers
+    dataset_name = f"mnist{mnist_num}"
+    dataset_dir = f"../mnist_image_samples/{mnist_num}" # Needed only for actual, not synthetic datasets
+
+    # This code part is for sklearn dataset
+    # dataset_name = "circles"
+
+    diffusion_model_name = "ddpm_nn"
+    noise_model_name = "unet2d"  # noise_model_name must be consistent with dataset_name
     # dataset_name variables if dataset is mnist
-    mnist_num = "8"  # Can be None if we are going to use all mnist numbers
-    # dataset_name = f"mnist{mnist_num}"
 
-    # dataset_name for sklearn datasets
-    dataset_name = "circles"
-
-    # needed only for actual, not synthetic datasets
-    dataset_dir = f"../mnist_image_samples/{mnist_num}"
     checkpoints_dir = f"../models/checkpoints"
-    time_steps = 1000
     device = torch.device('cuda')
+
+    # constants
+    time_steps = 1000
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 1024
+    batch_size = 64
     num_train_step = 5000
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
     unet_dim = 64
+
     # Some assertion for params
     assert num_train_step % checkpoint_freq == 0
-    checkpoints_path = os.path.join(checkpoints_dir, f"{model_name}_{dataset_name}")
+    checkpoints_path = os.path.join(checkpoints_dir, f"{diffusion_model_name}_{dataset_name}")
     assert dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES + GaussianDiffusion.SKLEARN_DATASET_NAMES
-    # Check the consistency between batch_size and dataset_name
-    # For sklearn dataset, assert batch_size == 1. Why ? because each call to the sklearn dataset, like make_circles,
-    # already returns a batch. Such a call is inside the __get_item function dataset, and using a dataloader
-    # attached to the dataset, makes another level of batching using the next(iter(data_loader)) call.
+    # models assertions
+    assert diffusion_model_name in ["ddpm_nn"]
+    if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
+        assert noise_model_name in ["unet2d"]
+    elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
+        assert noise_model_name in ["head_tail", "fcnn"]
+    else:
+        raise ValueError(f"Unknown dataset_name : {dataset_name}")
 
     # Delete an old checkpoint path, with contents, then create a new fresh one
     logger.info(f"Removing checkpoint dir : {checkpoints_path} if exists")
@@ -452,15 +460,15 @@ if __name__ == '__main__':
     logger.info(f'Cuda device count = {torch.cuda.device_count()}')
 
     diffusion_model = None
-    ddpm_step_model = None
+    noise_model = None
     trainer = None
     if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
-        ddpm_step_model = Unet2D(dim=unet_dim,
-                                 channels=num_channels,
-                                 dim_mults=(1, 2, 4, 8),
-                                 flash_attn=True)
+        noise_model = Unet2D(dim=unet_dim,
+                             channels=num_channels,
+                             dim_mults=(1, 2, 4, 8),
+                             flash_attn=True)
         diffusion_model = GaussianDiffusion(
-            model=ddpm_step_model,
+            noise_model=noise_model,
             dataset_name=dataset_name,
             image_size=image_size,
             timesteps=time_steps,  # number of steps
@@ -478,8 +486,11 @@ if __name__ == '__main__':
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
 
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        ddpm_step_model = FuncApproxNN(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
-        diffusion_model = GaussianDiffusion(model=ddpm_step_model, dataset_name=dataset_name,
+        if noise_model_name == "head_tail":
+            noise_model = HeadTail(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
+        elif noise_model_name == "fcnn":
+            raise NotImplementedError(f"noise model name : {noise_model_name} is not implemented ")
+        diffusion_model = GaussianDiffusion(noise_model=noise_model, dataset_name=dataset_name,
                                             timesteps=time_steps).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
         trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size, train_num_steps=num_train_step,
@@ -495,7 +506,7 @@ if __name__ == '__main__':
     # DDPM step model: can any regression model
     # Double-check if models are actually on cuda
     #   https://discuss.pytorch.org/t/how-to-check-if-model-is-on-cuda/180/2
-    is_unet_model_on_cuda = next(ddpm_step_model.parameters()).is_cuda
+    is_unet_model_on_cuda = next(noise_model.parameters()).is_cuda
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
     is_diffusion_model_on_cuda = next(diffusion_model.parameters()).is_cuda
     logger.info(f'Is diffusion model on cuda? : {is_diffusion_model_on_cuda}')

@@ -26,7 +26,7 @@ if __name__ == '__main__':
     ).to(device)
 
     diffusion = GaussianDiffusion(
-        model=model,
+        noise_model=model,
         image_size=image_size,
         timesteps=time_steps,  # number of steps
         auto_normalize=False

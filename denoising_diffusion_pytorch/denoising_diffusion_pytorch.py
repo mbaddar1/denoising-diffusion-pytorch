@@ -298,7 +298,7 @@ class Attention(nn.Module):
 
 
 # model
-class FuncApproxNN(nn.Module):
+class HeadTail(nn.Module):
     """
     A Generic UNet class that is not attached to image datasets
     """
@@ -339,37 +339,6 @@ class FuncApproxNN(nn.Module):
         x_out_tensor = torch.stack(x_out_list, dim=0)
         return x_out_tensor
 
-        # h = []
-        #
-        # for block1, block2, attn, downsample in self.downs:
-        #     x = block1(x, t)
-        #     h.append(x)
-        #
-        #     x = block2(x, t)
-        #     x = attn(x) + x
-        #     h.append(x)
-        #
-        #     x = downsample(x)
-        #
-        # x = self.mid_block1(x, t)
-        # x = self.mid_attn(x) + x
-        # x = self.mid_block2(x, t)
-        #
-        # for block1, block2, attn, upsample in self.ups:
-        #     x = torch.cat((x, h.pop()), dim=1)
-        #     x = block1(x, t)
-        #
-        #     x = torch.cat((x, h.pop()), dim=1)
-        #     x = block2(x, t)
-        #     x = attn(x) + x
-        #
-        #     x = upsample(x)
-        #
-        # x = torch.cat((x, r), dim=1)
-        #
-        # x = self.final_res_block(x, t)
-        # out_ = self.final_conv(x)  # For debugging
-        # return out_
 
 
 class Unet2D(nn.Module):
@@ -382,6 +351,10 @@ class Unet2D(nn.Module):
     - denoising-diffusion-pytorch/denoising_diffusion_pytorch/denoising_diffusion_pytorch.py:419
     The corresponding 1D class is here
     denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d.Unet1D
+
+    Articles and Resources about UNet Architecture
+    https://medium.com/@kemalpiro/step-by-step-visual-introduction-to-diffusion-models-235942d2f15c
+    https://theaisummer.com/diffusion-models/
     """
 
     def __init__(
@@ -601,7 +574,7 @@ class GaussianDiffusion(nn.Module):
     # Flat datasets are like sklearn datasets and the batches are of shape B X D
     def __init__(
             self,
-            model: torch.nn.Module,
+            noise_model: torch.nn.Module,
             dataset_name: str,
             timesteps=1000,
             sampling_timesteps=None,
@@ -618,18 +591,18 @@ class GaussianDiffusion(nn.Module):
 
     ):
         super().__init__()
-        if hasattr(model, "channels") and isinstance(model, Unet2D):
-            assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
+        if hasattr(noise_model, "channels") and isinstance(noise_model, Unet2D):
+            assert not (type(self) == GaussianDiffusion and noise_model.channels != noise_model.out_dim)
         else:
             logger.info(
-                f"func. approx. model of class {type(model)} has no channels attribute, no assertions to be done")
-        if hasattr(model, "random_or_learned_sinusoidal_cond"):
-            assert not model.random_or_learned_sinusoidal_cond
+                f"func. approx. model of class {type(noise_model)} has no channels attribute, no assertions to be done")
+        if hasattr(noise_model, "random_or_learned_sinusoidal_cond"):
+            assert not noise_model.random_or_learned_sinusoidal_cond
         else:
-            logger.info(f"func. approx. model of class {type(model)} has no "
+            logger.info(f"func. approx. model of class {type(noise_model)} has no "
                         f"random_or_learned_sinusoidal_cond attribute, no assertions to be done")
 
-        self.model = model
+        self.model = noise_model
         self.dataset_name = dataset_name
         self.channels = getattr(self.model, "channels", None)
         self.self_condition = getattr(self.model, "self_condition", None)

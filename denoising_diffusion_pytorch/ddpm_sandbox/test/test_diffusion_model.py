@@ -16,7 +16,7 @@ from PIL import Image
 from os import listdir
 from os.path import isfile, join
 
-from denoising_diffusion_pytorch.denoising_diffusion_pytorch import FuncApproxNN
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import HeadTail
 
 # logger
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +27,7 @@ def tensor_to_images(sample_tensor: torch.Tensor, dataset_name: str):
     if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
         # Assume images of the shape is B X C X H X W where N is the number of images
         assert len(sample_tensor.shape) == 4, "Images tensor must have dims B X C X H X W"
-        # assert that C = 1, i.e. one channel and the image is BW
+        # assert that C = 1, i.e., one channel and the image is BW
         assert sample_tensor.shape[1] == 1, "Supporting BW images only with one channel, i.e. dim C = 1"
         sample_tensor = torch.clamp(input=sample_tensor, min=0, max=1) * 255.0
         sample_tensor = sample_tensor.squeeze()
@@ -60,12 +60,12 @@ if __name__ == '__main__':
     batch_size = 64
     # num_train_step = 20_000
     model_name = "ddpm_nn"
-    dataset_name = "circles"
+    dataset_name = "mnist6"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
 
     model_checkpoints_path = f"../models/checkpoints/{model_name}_{dataset_name}"
-    final_model_checkpoint_name = "checkpoint_model_20000.pt"
+    final_model_checkpoint_name = "checkpoint_model_5000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
@@ -84,15 +84,15 @@ if __name__ == '__main__':
         ).to(device)
         diffusion_model = GaussianDiffusion(
             dataset_name="mnist8",
-            model=step_model,
+            noise_model=step_model,
             image_size=image_size,
             timesteps=time_steps,  # number of steps
             auto_normalize=False
         ).to(device)
         sample_batch_size = 4
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        step_model = FuncApproxNN(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
-        diffusion_model = GaussianDiffusion(model=step_model, dataset_name=dataset_name,
+        step_model = HeadTail(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
+        diffusion_model = GaussianDiffusion(noise_model=step_model, dataset_name=dataset_name,
                                             timesteps=time_steps).to(device)
         sample_batch_size = 1024
     else:
@@ -121,6 +121,8 @@ if __name__ == '__main__':
         baseline_sinkhorn_value = 40
     elif dataset_name == "circles":
         baseline_sinkhorn_value = 0.06
+    elif dataset_name == "mnist6":
+        baseline_sinkhorn_value = 35 # just adhoc val. need to set it correctly
     else:
         raise ValueError(f"Still have no baseline sinkhorn distance for dataset_name = {dataset_name}")
     for iter_num in checkpoint_niters:

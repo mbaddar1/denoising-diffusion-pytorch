@@ -70,14 +70,14 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales, thres = 0.999):
 class LearnedGaussianDiffusion(GaussianDiffusion):
     def __init__(
         self,
-        model,
+        noise_model,
         vb_loss_weight = 0.001,  # lambda was 0.001 in the paper
         *args,
         **kwargs
     ):
-        super().__init__(model, *args, **kwargs)
-        assert model.out_dim == (model.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
-        assert not model.self_condition, 'not supported yet'
+        super().__init__(noise_model, *args, **kwargs)
+        assert noise_model.out_dim == (noise_model.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
+        assert not noise_model.self_condition, 'not supported yet'
 
         self.vb_loss_weight = vb_loss_weight
 
