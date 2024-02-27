@@ -36,7 +36,7 @@ from tqdm import tqdm
 from datetime import datetime
 import torch
 import shutil
-from denoising_diffusion_pytorch.denoising_diffusion_pytorch import HeadTail
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import HeadTail, SimpleNN1, SimpleResNet
 from stat_dist.layers import SinkhornDistance
 
 # logger
@@ -317,7 +317,7 @@ class DDPmTrainer:
                 raise ValueError(f"Unknown dataset_name : {self.diffusion_model.dataset_name}")
         logger.info(f"Forward process Viz finished")
 
-    def set_sinkhorn_baseline(self, num_iter=100, **kwargs) -> Tuple[float, float]:
+    def set_sinkhorn_baseline(self, num_iter=10, **kwargs) -> Tuple[float, float]:
         distances_list = []
         sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
         for _ in tqdm(range(num_iter), desc="sinkhorn baseline calculations"):
@@ -407,15 +407,13 @@ class DDPmTrainer:
 
 if __name__ == '__main__':
     # Params
-
     # This code part is for mnist dataset name
-    mnist_num = "6"  # Can be None if we are going to use all mnist numbers
+    # mnist_num = "6"  # Can be None if we are going to use all mnist numbers
     # dataset_name = f"mnist{mnist_num}"
     # dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
 
     # This code part is for sklearn dataset
     dataset_name = "circles"
-
     # Diffusion Model parameters
     diffusion_model_name = "ddpm_nn"
     diffusion_model_objective = "pred_noise"
@@ -435,8 +433,9 @@ if __name__ == '__main__':
     num_train_iterations = 10_000
     debug_flag = False
     pbar_update_freq = 100
-    checkpoint_freq = 1000
+    checkpoint_freq = 100
     unet_dim = 64
+    hidden_dim = 256
 
     # Some assertion for params
     assert num_train_iterations % checkpoint_freq == 0
@@ -447,7 +446,7 @@ if __name__ == '__main__':
     if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
         assert noise_model_name in ["unet2d"]
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        assert noise_model_name in ["head_tail", "fcnn"]
+        assert noise_model_name in ["head_tail", "simple_nn1", "simple_resnet"]
     else:
         raise ValueError(f"Unknown dataset_name : {dataset_name}")
 
@@ -479,8 +478,7 @@ if __name__ == '__main__':
             objective=diffusion_model_objective
         ).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
-        image_dataset = ImageDataset(image_size=image_size,
-                                     data_dir=dataset_dir)
+        image_dataset = ImageDataset(image_size=image_size, data_dir=dataset_dir)
         trainer = DDPmTrainer(diffusion_model=diffusion_model, image_dataset=image_dataset, batch_size=batch_size,
                               num_train_iterations=num_train_iterations, device=device, optimizer=opt,
                               progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
@@ -491,11 +489,16 @@ if __name__ == '__main__':
 
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
         if noise_model_name == "head_tail":
-            noise_model = HeadTail(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
-        elif noise_model_name == "fcnn":
-            raise NotImplementedError(f"noise model name : {noise_model_name} is not implemented ")
+            noise_model = HeadTail(hidden_dim=hidden_dim, input_dim=2, time_steps=time_steps).to(device)
+        elif noise_model_name == "simple_nn1":
+            noise_model = SimpleNN1(hidden_dim=hidden_dim, input_out_dim=2, diffusion_time_steps=time_steps)
+        elif noise_model_name == "simple_resnet":
+            noise_model = SimpleResNet(hidden_dim=hidden_dim, input_out_dim=2, diffusion_time_steps=time_steps)
+        else:
+            raise ValueError(f"Unsupported noise_model : {noise_model_name}")
         diffusion_model = GaussianDiffusion(noise_model=noise_model, dataset_name=dataset_name,
-                                            timesteps=time_steps,objective=diffusion_model_objective).to(device)
+                                            timesteps=time_steps, objective=diffusion_model_objective).to(device)
+
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
         trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size,
                               num_train_iterations=num_train_iterations, device=device, optimizer=opt,
