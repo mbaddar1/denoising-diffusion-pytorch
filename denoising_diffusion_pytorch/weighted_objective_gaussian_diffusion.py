@@ -39,7 +39,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         self.pred_x_start_loss_weight = pred_x_start_loss_weight
 
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
-        model_output = self.model(x, t)
+        model_output = self.noise_model(x, t)
 
         pred_noise, pred_x_start, weights = model_output.split(self.split_dims, dim = 1)
         normalized_weights = weights.softmax(dim = 1)
@@ -60,7 +60,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
-        model_output = self.model(x_t, t)
+        model_output = self.noise_model(x_t, t)
         pred_noise, pred_x_start, weights = model_output.split(self.split_dims, dim = 1)
 
         # get loss for predicted noise and x_start

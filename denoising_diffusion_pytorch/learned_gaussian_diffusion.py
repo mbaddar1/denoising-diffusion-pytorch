@@ -82,7 +82,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         self.vb_loss_weight = vb_loss_weight
 
     def model_predictions(self, x, t, clip_x_start = False):
-        model_output = self.model(x, t)
+        model_output = self.noise_model(x, t)
         model_output, pred_variance = model_output.chunk(2, dim = 1)
 
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
@@ -100,7 +100,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         return ModelPrediction(pred_noise, x_start, pred_variance)
 
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None, **kwargs):
-        model_output = default(model_output, lambda: self.model(x, t))
+        model_output = default(model_output, lambda: self.noise_model(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
 
         min_log = extract(self.posterior_log_variance_clipped, t, x.shape)
@@ -125,7 +125,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         # model output
 
-        model_output = self.model(x_t, t)
+        model_output = self.noise_model(x_t, t)
 
         # calculating kl loss for learned variance (interpolation)
 

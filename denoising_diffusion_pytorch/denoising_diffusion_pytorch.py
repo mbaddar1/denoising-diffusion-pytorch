@@ -7,6 +7,7 @@ from random import random
 from functools import partial
 from collections import namedtuple
 from multiprocessing import cpu_count
+from typing import Union
 
 import numpy as np
 import torch
@@ -323,22 +324,36 @@ class HeadTail(nn.Module):
                                                          nn.Linear(hidden_dim, input_dim, dtype=torch.float64)
                                                          ) for _ in range(time_steps)])
 
-    def forward(self, x, t, self_cond=None):
+    def forward(self, x, t: torch.Tensor, self_cond=None):
         # self_cond is a redundant parameter for compatibility
         # Similar to Impl. in
         # https://github.com/MaximeVandegar/Papers-in-100-Lines-of-Code/blob/main/Deep_Unsupervised_Learning_using_Nonequilibrium_Thermodynamics/diffusion_models.py#L26
         # https://papers-100-lines.medium.com/diffusion-models-from-scratch-tutorial-in-100-lines-of-pytorch-code-5dac9f472f1c
-        x = x.double()
+        assert sum(list(t.shape)) == 1
         assert len(x.shape) == 2
-        t_values = list(t.detach().cpu().numpy())
-        x_out_list = []
+        t_int = t.item()
+        x = x.double()
         h = self.network_head(x)
-        for i, t_val in enumerate(t_values):
-            x_out_single = self.network_tail[t_val](h[i, :])
-            x_out_list.append(x_out_single)
-        x_out_tensor = torch.stack(x_out_list, dim=0)
-        return x_out_tensor
+        out = self.network_tail[t_int](h)
+        return out
 
+
+class SimpleResNet(nn.Module):
+    """
+    Using a simple ResNet model for noise model
+
+    main refs
+    https://blog.paperspace.com/writing-resnet-from-scratch-in-pytorch/
+
+    Unet vs ResNet in image segmentation
+    https://aditi-mittal.medium.com/introduction-to-u-net-and-res-net-for-image-segmentation-9afcb432ee2f
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self):
+        pass
 
 
 class Unet2D(nn.Module):
@@ -355,6 +370,13 @@ class Unet2D(nn.Module):
     Articles and Resources about UNet Architecture
     https://medium.com/@kemalpiro/step-by-step-visual-introduction-to-diffusion-models-235942d2f15c
     https://theaisummer.com/diffusion-models/
+
+    Why Unet is used in DDPM models
+    https://huggingface.co/docs/diffusers/api/models/unet
+
+    Unraveling the Temporal Dynamics of the Unet in Diffusion Models
+    https://arxiv.org/pdf/2312.14965.pdf
+
     """
 
     def __init__(
@@ -524,7 +546,8 @@ class Unet2D(nn.Module):
 def extract(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
-    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
+    final_out = out.reshape(b, *((1,) * (len(x_shape) - 1)))  # added line for debugging
+    return final_out
 
 
 def linear_beta_schedule(timesteps):
@@ -576,9 +599,9 @@ class GaussianDiffusion(nn.Module):
             self,
             noise_model: torch.nn.Module,
             dataset_name: str,
+            objective: str,
             timesteps=1000,
             sampling_timesteps=None,
-            objective='pred_v',
             beta_schedule='sigmoid',
             schedule_fn_kwargs=dict(),
             ddim_sampling_eta=0.,
@@ -602,10 +625,10 @@ class GaussianDiffusion(nn.Module):
             logger.info(f"func. approx. model of class {type(noise_model)} has no "
                         f"random_or_learned_sinusoidal_cond attribute, no assertions to be done")
 
-        self.model = noise_model
+        self.noise_model = noise_model
         self.dataset_name = dataset_name
-        self.channels = getattr(self.model, "channels", None)
-        self.self_condition = getattr(self.model, "self_condition", None)
+        self.channels = getattr(self.noise_model, "channels", None)
+        self.self_condition = getattr(self.noise_model, "self_condition", None)
         self.image_size = kwargs.get("image_size", None)
         self.objective = objective
         assert objective in {'pred_noise', 'pred_x0',
@@ -736,7 +759,7 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def model_predictions(self, x, t, x_self_cond=None, clip_x_start=False, rederive_pred_noise=False):
-        model_output = self.model(x, t, x_self_cond)
+        model_output = self.noise_model(x, t, x_self_cond)
         maybe_clip = partial(torch.clamp, min=-1., max=1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
@@ -773,7 +796,10 @@ class GaussianDiffusion(nn.Module):
     @torch.inference_mode()
     def p_sample(self, x, t: int, x_self_cond=None):
         b, *_, device = *x.shape, self.device
-        batched_times = torch.full((b,), t, device=device, dtype=torch.long)
+        if self.dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES and isinstance(self.noise_model, HeadTail):
+            batched_times = torch.full((1,), t, device=device, dtype=torch.long)
+        else:
+            batched_times = torch.full((b,), t, device=device, dtype=torch.long)
         model_mean, _, model_log_variance, x_start = self.p_mean_variance(x=x, t=batched_times, x_self_cond=x_self_cond,
                                                                           clip_denoised=True)
         noise = torch.randn_like(x) if t > 0 else 0.  # no noise if t == 0
@@ -908,15 +934,19 @@ class GaussianDiffusion(nn.Module):
 
     @autocast(enabled=False)
     def q_sample(self, x_start, t, noise=None):
-        noise = default(noise, lambda: torch.randn_like(x_start))
-
+        """
+        Function to do the forward process for the diffusion models
+            - See eq (4) https://arxiv.org/pdf/2006.11239.pdf p. 2
+            -
+        """
+        noise = default(noise, lambda: torch.randn_like(x_start))  # I ~ N(0,1) with given shape
+        sqrt_alpha_cumprod_t = extract(self.sqrt_alphas_cumprod, t, x_start.shape)
+        sqrt_one_minus_alphas_cumprod_t = extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
         return (
-                extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
-                extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
+                sqrt_alpha_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
         )
 
-    def p_losses_flat(self, x_start, t, noise=None, offset_noise_strength=None):
-        b, d = x_start.shape
+    def p_losses_flat(self, x_start, t: torch.tensor, noise=None, offset_noise_strength=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
         # offset noise - https://www.crosslabs.org/blog/diffusion-with-offset-noise
 
@@ -940,7 +970,7 @@ class GaussianDiffusion(nn.Module):
                 x_self_cond = self.model_predictions(x, t).pred_x_start
                 x_self_cond.detach_()
 
-        model_out = self.model(x, t, x_self_cond)
+        model_out = self.noise_model(x, t, x_self_cond)
         if self.objective == 'pred_noise':
             target = noise
         elif self.objective == 'pred_x0':
@@ -972,7 +1002,7 @@ class GaussianDiffusion(nn.Module):
 
         x = self.q_sample(x_start=x_start, t=t, noise=noise)
 
-        # if doing self-conditioning, 50% of the time, predict x_start from current set of times
+        # if doing self-conditioning, 50% of the time, predict x_start from a current set of times
         # and condition with unet with that
         # this technique will slow down training by 25%, but seems to lower FID significantly
 
@@ -982,7 +1012,7 @@ class GaussianDiffusion(nn.Module):
                 x_self_cond = self.model_predictions(x, t).pred_x_start
                 x_self_cond.detach_()
 
-        model_out = self.model(x, t, x_self_cond)
+        model_out = self.noise_model(x, t, x_self_cond)
         if self.objective == 'pred_noise':
             target = noise
         elif self.objective == 'pred_x0':
@@ -1013,7 +1043,11 @@ class GaussianDiffusion(nn.Module):
             assert len(x.shape) == 2
             b, d = x.shape[0], x.shape[1]
             device = x.device
-            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+            if isinstance(self.noise_model, HeadTail):
+                t = torch.randint(0, self.num_timesteps, (1,), device=device).long()
+            else:
+                raise NotImplementedError(
+                    f"Not implemented yet : p_losses method for noise_model {type(self.noise_model)}")
             losses = self.p_losses_flat(x, t, *args, **kwargs)
         else:
             raise ValueError(f"Unsupported dataset : {self.dataset_name}")

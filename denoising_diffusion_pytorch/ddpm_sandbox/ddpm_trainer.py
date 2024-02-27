@@ -410,28 +410,28 @@ if __name__ == '__main__':
 
     # This code part is for mnist dataset name
     mnist_num = "6"  # Can be None if we are going to use all mnist numbers
-    dataset_name = f"mnist{mnist_num}"
-    dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
+    # dataset_name = f"mnist{mnist_num}"
+    # dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
 
     # This code part is for sklearn dataset
-    # dataset_name = "circles"
+    dataset_name = "circles"
 
     # Diffusion Model parameters
     diffusion_model_name = "ddpm_nn"
     diffusion_model_objective = "pred_noise"
-    noise_model_name = "unet2d"
-    # noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
+    # noise_model_name = "unet2d"
+    noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
     # dataset_name variables if dataset is mnist
 
     checkpoints_dir = f"../models/checkpoints"
     device = torch.device('cuda')
 
     # constants
-    time_steps = 1000  # 1000 for mnist datasets and 40 or 50 for Sklearn datasets
+    time_steps = 50  # 1000 for mnist datasets and 40 or 50 for Sklearn datasets
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 64
+    batch_size = 2048
     num_train_iterations = 10_000
     debug_flag = False
     pbar_update_freq = 100
@@ -495,7 +495,7 @@ if __name__ == '__main__':
         elif noise_model_name == "fcnn":
             raise NotImplementedError(f"noise model name : {noise_model_name} is not implemented ")
         diffusion_model = GaussianDiffusion(noise_model=noise_model, dataset_name=dataset_name,
-                                            timesteps=time_steps).to(device)
+                                            timesteps=time_steps,objective=diffusion_model_objective).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
         trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size,
                               num_train_iterations=num_train_iterations, device=device, optimizer=opt,

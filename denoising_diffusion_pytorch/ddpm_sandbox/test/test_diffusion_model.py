@@ -52,7 +52,7 @@ def tensor_to_images(sample_tensor: torch.Tensor, dataset_name: str):
 
 
 if __name__ == '__main__':
-    time_steps = 1000
+    time_steps = 50
     device = torch.device('cuda')
     image_size = 32
     num_images = 1
@@ -60,7 +60,8 @@ if __name__ == '__main__':
     batch_size = 32
     # num_train_step = 20_000
     model_name = "ddpm_nn"
-    dataset_name = "mnist6"
+    # dataset_name = "mnist6"
+    dataset_name = "circles"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
     diffusion_model_objective="pred_noise"
@@ -76,7 +77,7 @@ if __name__ == '__main__':
     logger.info(f"Creating Noise Model.")
     # UNet
     if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
-        step_model = Unet2D(
+        noise_model = Unet2D(
             dim=64,
             channels=num_channels,
             dim_mults=(1, 2, 4, 8),
@@ -84,7 +85,7 @@ if __name__ == '__main__':
         ).to(device)
         diffusion_model = GaussianDiffusion(
             dataset_name="mnist6",
-            noise_model=step_model,
+            noise_model=noise_model,
             image_size=image_size,
             timesteps=time_steps,  # number of steps
             auto_normalize=False,
@@ -92,15 +93,15 @@ if __name__ == '__main__':
         ).to(device)
         sample_batch_size = 4
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        step_model = HeadTail(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
-        diffusion_model = GaussianDiffusion(noise_model=step_model, dataset_name=dataset_name,
-                                            timesteps=time_steps).to(device)
+        noise_model = HeadTail(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
+        diffusion_model = GaussianDiffusion(noise_model=noise_model, dataset_name=dataset_name,
+                                            timesteps=time_steps, objective=diffusion_model_objective).to(device)
         sample_batch_size = 1024
     else:
         raise ValueError(f"Unknown dataset_name : {dataset_name}")
     # Double-checking if models are actually on cuda
     #   https://discuss.pytorch.org/t/how-to-check-if-model-is-on-cuda/180/2
-    is_unet_model_on_cuda = next(step_model.parameters()).is_cuda
+    is_unet_model_on_cuda = next(noise_model.parameters()).is_cuda
     logger.info(f'If core model is on cuda ? : {is_unet_model_on_cuda}')
 
     is_diffusion_model_on_cuda = next(diffusion_model.parameters()).is_cuda
