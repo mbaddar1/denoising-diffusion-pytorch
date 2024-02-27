@@ -107,7 +107,7 @@ class DDPmTrainer:
     def __init__(self,
                  diffusion_model: GaussianDiffusion,
                  batch_size: int,
-                 train_num_steps: int,
+                 num_train_iterations: int,
                  device: torch.device,
                  optimizer: Optimizer,
                  progress_bar_update_freq: int,
@@ -124,7 +124,7 @@ class DDPmTrainer:
         self.diffusion_model = diffusion_model
         self.debug_flag = debug_flag
         self.device = device
-        self.train_num_steps = train_num_steps
+        self.num_train_iterations = num_train_iterations
         self.optimizer = optimizer
         self.step = 0
         self.checkpoint_freq = checkpoint_freq
@@ -203,15 +203,15 @@ class DDPmTrainer:
     def train(self):
         # Use manual control for tqdm and progress bar update
         # See https://github.com/tqdm/tqdm#usage
-        # and   https://stackoverflow.com/a/45808255
+        # and https://stackoverflow.com/a/45808255
         self.step = 0
         # Exponential smoothing for loss reporting
         # Called Exponential Smoothing or Exponential Moving Average
         ema_loss = 0.0  # Just for initialization
         ema_loss_alpha = 0.9
         start_timestamp = datetime.now()
-        with tqdm(initial=self.step, total=self.train_num_steps) as progress_bar:
-            while self.step <= self.train_num_steps:  # note the boundary condition
+        with tqdm(initial=self.step, total=self.num_train_iterations) as progress_bar:
+            while self.step <= self.num_train_iterations:  # note the boundary condition
                 self.optimizer.zero_grad()
                 data = self.get_next_data_batch()
                 loss = self.diffusion_model(data)
@@ -237,7 +237,7 @@ class DDPmTrainer:
                     checkpoint_metadata = json.dumps({"ema_loss": ema_loss,
                                                       "sinkhorn_dist_avg": sh_dist_avg,
                                                       "sinkhorn_dist_std": sh_dist_std,
-                                                      "train_num_iters": self.train_num_steps,
+                                                      "train_num_iters": self.num_train_iterations,
                                                       "batch_size": self.batch_size,
                                                       "data_shape": data.shape,
                                                       "train_step": self.step})
@@ -411,32 +411,35 @@ if __name__ == '__main__':
     # This code part is for mnist dataset name
     mnist_num = "6"  # Can be None if we are going to use all mnist numbers
     dataset_name = f"mnist{mnist_num}"
-    dataset_dir = f"../mnist_image_samples/{mnist_num}" # Needed only for actual, not synthetic datasets
+    dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
 
     # This code part is for sklearn dataset
     # dataset_name = "circles"
 
+    # Diffusion Model parameters
     diffusion_model_name = "ddpm_nn"
-    noise_model_name = "unet2d"  # noise_model_name must be consistent with dataset_name
+    diffusion_model_objective = "pred_noise"
+    noise_model_name = "unet2d"
+    # noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
     # dataset_name variables if dataset is mnist
 
     checkpoints_dir = f"../models/checkpoints"
     device = torch.device('cuda')
 
     # constants
-    time_steps = 1000
+    time_steps = 1000  # 1000 for mnist datasets and 40 or 50 for Sklearn datasets
     image_size = 32
     num_images = 1
     num_channels = 1
     batch_size = 64
-    num_train_step = 5000
+    num_train_iterations = 10_000
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000
     unet_dim = 64
 
     # Some assertion for params
-    assert num_train_step % checkpoint_freq == 0
+    assert num_train_iterations % checkpoint_freq == 0
     checkpoints_path = os.path.join(checkpoints_dir, f"{diffusion_model_name}_{dataset_name}")
     assert dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES + GaussianDiffusion.SKLEARN_DATASET_NAMES
     # models assertions
@@ -472,13 +475,14 @@ if __name__ == '__main__':
             dataset_name=dataset_name,
             image_size=image_size,
             timesteps=time_steps,  # number of steps
-            auto_normalize=False
+            auto_normalize=False,
+            objective=diffusion_model_objective
         ).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
         image_dataset = ImageDataset(image_size=image_size,
                                      data_dir=dataset_dir)
         trainer = DDPmTrainer(diffusion_model=diffusion_model, image_dataset=image_dataset, batch_size=batch_size,
-                              train_num_steps=num_train_step, device=device, optimizer=opt,
+                              num_train_iterations=num_train_iterations, device=device, optimizer=opt,
                               progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
                               checkpoints_path=checkpoints_path, debug_flag=debug_flag)
         trainer.forward_process_viz()
@@ -493,9 +497,11 @@ if __name__ == '__main__':
         diffusion_model = GaussianDiffusion(noise_model=noise_model, dataset_name=dataset_name,
                                             timesteps=time_steps).to(device)
         opt = Adam(params=diffusion_model.parameters(), lr=1e-4)
-        trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size, train_num_steps=num_train_step,
-                              device=device, optimizer=opt, progress_bar_update_freq=pbar_update_freq,
-                              checkpoint_freq=checkpoint_freq, checkpoints_path=checkpoints_path, debug_flag=debug_flag)
+        trainer = DDPmTrainer(diffusion_model=diffusion_model, batch_size=batch_size,
+                              num_train_iterations=num_train_iterations, device=device, optimizer=opt,
+                              progress_bar_update_freq=pbar_update_freq,
+                              checkpoint_freq=checkpoint_freq, checkpoints_path=checkpoints_path,
+                              debug_flag=debug_flag)
         trainer.forward_process_viz()
         sh_baseline_dist_avg, sh_baseline_dist_std = (
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))

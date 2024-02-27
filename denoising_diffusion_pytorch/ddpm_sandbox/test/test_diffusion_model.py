@@ -57,15 +57,15 @@ if __name__ == '__main__':
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 64
+    batch_size = 32
     # num_train_step = 20_000
     model_name = "ddpm_nn"
     dataset_name = "mnist6"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
-
+    diffusion_model_objective="pred_noise"
     model_checkpoints_path = f"../models/checkpoints/{model_name}_{dataset_name}"
-    final_model_checkpoint_name = "checkpoint_model_5000.pt"
+    final_model_checkpoint_name = "checkpoint_model_10000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     logger.info(f'Cuda device count = {torch.cuda.device_count()}')
     # https://github.com/mbaddar1/denoising-diffusion-pytorch?tab=readme-ov-file#usage
 
-    logger.info(f"Creating UNet and Diffusion Models ")
+    logger.info(f"Creating Noise Model.")
     # UNet
     if dataset_name in GaussianDiffusion.MNIST_DATASET_NAMES:
         step_model = Unet2D(
@@ -83,11 +83,12 @@ if __name__ == '__main__':
             flash_attn=True
         ).to(device)
         diffusion_model = GaussianDiffusion(
-            dataset_name="mnist8",
+            dataset_name="mnist6",
             noise_model=step_model,
             image_size=image_size,
             timesteps=time_steps,  # number of steps
-            auto_normalize=False
+            auto_normalize=False,
+            objective=diffusion_model_objective
         ).to(device)
         sample_batch_size = 4
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
