@@ -350,11 +350,11 @@ class SimpleResNet(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor, x_self_cont: bool):
         t_norm = (t / float(self.diffusion_time_steps)).reshape(-1, 1)
         depth = 10
-        x_input = x.to(torch.float64) # torch.cat([x, t_norm],dim=1).to(torch.float64)
+        x_input = x.to(torch.float64)  # torch.cat([x, t_norm],dim=1).to(torch.float64)
         x_out = x
         for i in range(depth):
             x_out = self.block(x_input)
-            x_input = x_out.to(torch.float64) # torch.cat([x_out, t_norm],dim=1).to(torch.float64)
+            x_input = x_out.to(torch.float64)  # torch.cat([x_out, t_norm],dim=1).to(torch.float64)
         return x_out
 
 
@@ -438,7 +438,7 @@ class Unet2D(nn.Module):
 
         # time embeddings
 
-        time_dim = dim * 4
+        time_dim = 1  # dim * 4
 
         self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
 
@@ -528,8 +528,8 @@ class Unet2D(nn.Module):
         x = self.init_conv(x)
         r = x.clone()
 
-        t = self.time_mlp(time)
-
+        # t = self.time_mlp(time)
+        t = torch.tensor([1.0], device=x.device).reshape(-1, 1)
         h = []
 
         for block1, block2, attn, downsample in self.downs:
@@ -1067,7 +1067,7 @@ class GaussianDiffusion(nn.Module):
             device = x.device
             if isinstance(self.noise_model, HeadTail):
                 t = torch.randint(0, self.num_timesteps, (1,), device=device).long()
-            elif isinstance(self.noise_model, (SimpleNN1,SimpleResNet)):
+            elif isinstance(self.noise_model, (SimpleNN1, SimpleResNet)):
                 t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
             else:
                 raise NotImplementedError(
