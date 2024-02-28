@@ -429,7 +429,7 @@ if __name__ == '__main__':
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 32
+    batch_size = 64
     num_train_iterations = 5_000
     debug_flag = False
     pbar_update_freq = 100

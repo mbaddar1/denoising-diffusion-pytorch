@@ -192,7 +192,7 @@ class Block(nn.Module):
 class ResnetBlock(nn.Module):
     def __init__(self, dim, dim_out, *, time_emb_dim=None, groups=8):
         super().__init__()
-        self.mlp = nn.Sequential(
+        self.time_embedding_mlp = nn.Sequential(
             nn.SiLU(),
             nn.Linear(time_emb_dim, dim_out * 2)
         ) if exists(time_emb_dim) else None
@@ -203,8 +203,8 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x, time_emb=None):
         scale_shift = None
-        if exists(self.mlp) and exists(time_emb):
-            time_emb = self.mlp(time_emb)
+        if exists(self.time_embedding_mlp) and exists(time_emb):
+            time_emb = self.time_embedding_mlp(time_emb)
             time_emb = rearrange(time_emb, 'b c -> b c 1 1')
             scale_shift = time_emb.chunk(2, dim=1)
 
@@ -438,7 +438,7 @@ class Unet2D(nn.Module):
 
         # time embeddings
 
-        time_dim = 1  # dim * 4
+        time_dim = dim * 4
 
         self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
 
@@ -513,6 +513,9 @@ class Unet2D(nn.Module):
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim=time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
+        # some experimentation
+        self.resnet_block_one = ResnetBlock(dim=dim, dim_out=dim, time_emb_dim=None)
+
     @property
     def downsample_factor(self):
         return 2 ** (len(self.downs) - 1)
@@ -527,9 +530,15 @@ class Unet2D(nn.Module):
 
         x = self.init_conv(x)
         r = x.clone()
+        t = self.time_mlp(time)
+        # t = torch.tensor([1.0], device=x.device).reshape(-1, 1)
 
-        # t = self.time_mlp(time)
-        t = torch.tensor([1.0], device=x.device).reshape(-1, 1)
+        ## experimental attempt 1
+        # x = self.init_conv(x)
+        # x = self.resnet_block_one(x, t)
+        # x = self.final_conv(x)
+        # return x
+        #
         h = []
 
         for block1, block2, attn, downsample in self.downs:
@@ -1057,7 +1066,7 @@ class GaussianDiffusion(nn.Module):
             assert len(x.shape) == 4
             b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
             assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
-            t = torch.randint(0, self.num_timesteps, (1,), device=device).long()
+            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
             x_norm = self.normalize(x)
             # print(torch.mean(img))
             losses = self.p_losses_images(x_norm, t, *args, **kwargs)
