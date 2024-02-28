@@ -339,21 +339,43 @@ class HeadTail(nn.Module):
 
 
 class SimpleResNet(nn.Module):
-    """
-    Using a simple ResNet model for noise model
-
-    main refs
-    https://blog.paperspace.com/writing-resnet-from-scratch-in-pytorch/
-
-    Unet vs ResNet in image segmentation
-    https://aditi-mittal.medium.com/introduction-to-u-net-and-res-net-for-image-segmentation-9afcb432ee2f
-    """
-
-    def __init__(self, *args, **kwargs):
+    def __init__(self, input_out_dim: int, hidden_dim: int, diffusion_time_steps: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.input_out_dim = input_out_dim
+        self.hidden_dim = hidden_dim
+        self.diffusion_time_steps = diffusion_time_steps
+        self.block = nn.Sequential(nn.Linear(input_out_dim, hidden_dim, dtype=torch.float64)
+                                   , nn.ReLU(), nn.Linear(hidden_dim, input_out_dim, dtype=torch.float64))
 
-    def forward(self):
-        pass
+    def forward(self, x: torch.Tensor, t: torch.Tensor, x_self_cont: bool):
+        t_norm = (t / float(self.diffusion_time_steps)).reshape(-1, 1)
+        depth = 10
+        x_input = x.to(torch.float64) # torch.cat([x, t_norm],dim=1).to(torch.float64)
+        x_out = x
+        for i in range(depth):
+            x_out = self.block(x_input)
+            x_input = x_out.to(torch.float64) # torch.cat([x_out, t_norm],dim=1).to(torch.float64)
+        return x_out
+
+
+class SimpleNN1(nn.Module):
+    def __init__(self, input_out_dim: int, hidden_dim: int, diffusion_time_steps: int, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hidden_dim = hidden_dim
+        self.input_out_dim = input_out_dim
+        self.diffusion_time_steps = diffusion_time_steps
+        self.diffusion_time_steps = diffusion_time_steps
+        self.model = nn.Sequential(nn.Linear(input_out_dim, hidden_dim, dtype=torch.float64),
+                                   nn.ReLU(),
+                                   nn.Linear(hidden_dim, hidden_dim, dtype=torch.float64),
+                                   nn.ReLU(),
+                                   nn.Linear(hidden_dim, input_out_dim, dtype=torch.float64))
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor, x_self_cond: bool = False):
+        t_norm = (t / float(self.diffusion_time_steps)).reshape(-1, 1)
+        # x_aug = torch.cat([x, t_norm], dim=1).type(torch.float64)
+        out = self.model(x.to(torch.float64))
+        return out
 
 
 class Unet2D(nn.Module):
@@ -1035,7 +1057,7 @@ class GaussianDiffusion(nn.Module):
             assert len(x.shape) == 4
             b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
             assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
-            t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+            t = torch.randint(0, self.num_timesteps, (1,), device=device).long()
             x_norm = self.normalize(x)
             # print(torch.mean(img))
             losses = self.p_losses_images(x_norm, t, *args, **kwargs)
@@ -1045,6 +1067,8 @@ class GaussianDiffusion(nn.Module):
             device = x.device
             if isinstance(self.noise_model, HeadTail):
                 t = torch.randint(0, self.num_timesteps, (1,), device=device).long()
+            elif isinstance(self.noise_model, (SimpleNN1,SimpleResNet)):
+                t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
             else:
                 raise NotImplementedError(
                     f"Not implemented yet : p_losses method for noise_model {type(self.noise_model)}")
