@@ -60,13 +60,13 @@ if __name__ == '__main__':
     batch_size = 32
     # num_train_step = 20_000
     model_name = "ddpm_nn"
-    # dataset_name = "mnist6"
-    dataset_name = "circles"
+    dataset_name = "mnist8"
+    # dataset_name = "circles"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
     diffusion_model_objective="pred_noise"
     model_checkpoints_path = f"../models/checkpoints/{model_name}_{dataset_name}"
-    final_model_checkpoint_name = "checkpoint_model_10000.pt"
+    final_model_checkpoint_name = "checkpoint_model_5000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
     # Test if cuda is available
     logger.info(f"Cuda checks")
