@@ -226,17 +226,20 @@ class DDPmTrainer:
                 #   2. sampling code
                 #   3. quality measure for samples , along with loss (FID  , WD , etc..)
                 if self.step % self.progress_bar_update_freq == 0:
-                    progress_bar.set_description(f'loss: {ema_loss:.4f}')
+                    progress_bar.set_description(f'ema_loss: {ema_loss:.4f}')
                 if self.step % self.checkpoint_freq == 0:
                     # sinkhorn eval
                     logger.info(f"Generating a sample for sinkhorn evaluation.")
                     generated_sample = self.diffusion_model.sample(batch_size=self.batch_size)
-                    sh_dist_avg, sh_dist_std = self.sinkhorn_eval(generated_sample=generated_sample, num_iter=3)
+                    sinkhorn_dist_avg, sinkhorn_dist_std = self.sinkhorn_eval(generated_sample=generated_sample,
+                                                                              num_iter=3)
+                    logger.info(f"At step = {self.step} : sinkhorn-distance-avg = {sinkhorn_dist_avg}, "
+                                f"sinkhorn-distance-std = {sinkhorn_dist_std}")
                     # FIXME, there is redundancy in the metadata.
                     #  Make a main meta data file and another per-iter metadata one
                     checkpoint_metadata = json.dumps({"ema_loss": ema_loss,
-                                                      "sinkhorn_dist_avg": sh_dist_avg,
-                                                      "sinkhorn_dist_std": sh_dist_std,
+                                                      "sinkhorn_dist_avg": sinkhorn_dist_avg,
+                                                      "sinkhorn_dist_std": sinkhorn_dist_std,
                                                       "train_num_iters": self.num_train_iterations,
                                                       "batch_size": self.batch_size,
                                                       "data_shape": data.shape,
@@ -484,7 +487,7 @@ if __name__ == '__main__':
                               progress_bar_update_freq=pbar_update_freq, checkpoint_freq=checkpoint_freq,
                               checkpoints_path=checkpoints_path, debug_flag=debug_flag)
         trainer.forward_process_viz()
-        sh_baseline_dist_avg, sh_baseline_dist_std = (
+        sinkhorn_baseline_dist_avg, sinkhorn_baseline_dist_std = (
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
 
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
@@ -506,7 +509,7 @@ if __name__ == '__main__':
                               checkpoint_freq=checkpoint_freq, checkpoints_path=checkpoints_path,
                               debug_flag=debug_flag)
         trainer.forward_process_viz()
-        sh_baseline_dist_avg, sh_baseline_dist_std = (
+        sinkhorn_baseline_dist_avg, sinkhorn_baseline_dist_std = (
             trainer.set_sinkhorn_baseline(dataset_name=dataset_name, batch_size=batch_size, device=device))
     else:
         raise ValueError(f"Unknown dataset_name : {dataset_name}")
