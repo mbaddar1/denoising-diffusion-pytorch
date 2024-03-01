@@ -320,7 +320,7 @@ class DDPmTrainer:
                 raise ValueError(f"Unknown dataset_name : {self.diffusion_model.dataset_name}")
         logger.info(f"Forward process Viz finished")
 
-    def set_sinkhorn_baseline(self, num_iter=10, **kwargs) -> Tuple[float, float]:
+    def set_sinkhorn_baseline(self, num_iter=5, **kwargs) -> Tuple[float, float]:
         distances_list = []
         sinkhorn = SinkhornDistance(eps=0.1, max_iter=100, device=device)
         for _ in tqdm(range(num_iter), desc="sinkhorn baseline calculations"):
@@ -411,17 +411,17 @@ class DDPmTrainer:
 if __name__ == '__main__':
     # Params
     # This code part is for mnist dataset name
-    mnist_num = "8"  # Can be None if we are going to use all mnist numbers
-    dataset_name = f"mnist{mnist_num}"
-    dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
+    # mnist_num = "8"  # Can be None if we are going to use all mnist numbers
+    # dataset_name = f"mnist{mnist_num}"
+    # dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
 
     # This code part is for sklearn dataset
-    # dataset_name = "circles"
+    dataset_name = "circles"
     # Diffusion Model parameters
     diffusion_model_name = "ddpm_nn"
     diffusion_model_objective = "pred_noise"
-    noise_model_name = "unet2d"
-    # noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
+    # noise_model_name = "unet2d"
+    noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
     # dataset_name variables if dataset is mnist
 
     checkpoints_dir = f"../models/checkpoints"
@@ -432,11 +432,11 @@ if __name__ == '__main__':
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 64
-    num_train_iterations = 5_000
+    batch_size = 4000
+    num_train_iterations = 100_000
     debug_flag = False
     pbar_update_freq = 100
-    checkpoint_freq = 100
+    checkpoint_freq = 1000
     unet_dim = 64
     hidden_dim = 256
 
