@@ -433,7 +433,7 @@ if __name__ == '__main__':
     num_images = 1
     num_channels = 1
     batch_size = 4000
-    num_train_iterations = 100_000
+    num_train_iterations = 10_000
     debug_flag = False
     pbar_update_freq = 100
     checkpoint_freq = 1000

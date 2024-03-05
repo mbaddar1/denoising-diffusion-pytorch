@@ -60,8 +60,8 @@ if __name__ == '__main__':
     batch_size = 32
     # num_train_step = 20_000
     model_name = "ddpm_nn"
-    dataset_name = "mnist8"
-    # dataset_name = "circles"
+    # dataset_name = "mnist8"
+    dataset_name = "circles"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
     diffusion_model_objective="pred_noise"
@@ -93,7 +93,7 @@ if __name__ == '__main__':
         ).to(device)
         sample_batch_size = 4
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
-        noise_model = HeadTail(hidden_dim=128, input_dim=2, time_steps=time_steps).to(device)
+        noise_model = HeadTail(hidden_dim=256, input_dim=2, time_steps=time_steps).to(device)
         diffusion_model = GaussianDiffusion(noise_model=noise_model, dataset_name=dataset_name,
                                             timesteps=time_steps, objective=diffusion_model_objective).to(device)
         sample_batch_size = 1024
