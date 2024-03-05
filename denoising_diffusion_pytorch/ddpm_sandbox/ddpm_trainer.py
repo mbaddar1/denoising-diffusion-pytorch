@@ -411,28 +411,28 @@ class DDPmTrainer:
 if __name__ == '__main__':
     # Params
     # This code part is for mnist dataset name
-    # mnist_num = "8"  # Can be None if we are going to use all mnist numbers
-    # dataset_name = f"mnist{mnist_num}"
-    # dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
+    mnist_num = "8"  # Can be None if we are going to use all mnist numbers
+    dataset_name = f"mnist{mnist_num}"
+    dataset_dir = f"../mnist_image_samples/{mnist_num}"  # Needed only for actual, not synthetic datasets
 
     # This code part is for sklearn dataset
-    dataset_name = "circles"
+    # dataset_name = "circles"
     # Diffusion Model parameters
     diffusion_model_name = "ddpm_nn"
     diffusion_model_objective = "pred_noise"
-    # noise_model_name = "unet2d"
-    noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
+    noise_model_name = "unet2d"
+    # noise_model_name = "head_tail"  # noise_model_name must be consistent with dataset_name
     # dataset_name variables if dataset is mnist
 
     checkpoints_dir = f"../models/checkpoints"
     device = torch.device('cuda')
 
     # constants
-    time_steps = 50  # 1000 for mnist datasets and 40 or 50 for Sklearn datasets
+    time_steps = 1000  # 1000 for mnist datasets and 40 or 50 for Sklearn datasets
     image_size = 32
     num_images = 1
     num_channels = 1
-    batch_size = 4000
+    batch_size = 64
     num_train_iterations = 10_000
     debug_flag = False
     pbar_update_freq = 100
