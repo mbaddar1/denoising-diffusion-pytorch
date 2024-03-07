@@ -1,0 +1,1 @@
+{"ema_loss": 0.7306370163148727, "sinkhorn_dist_avg": 0.7529870390560486, "sinkhorn_dist_std": 0.0007581559410378379, "train_num_iters": 10000, "batch_size": 2048, "data_shape": [2048, 2], "train_step": 8000}

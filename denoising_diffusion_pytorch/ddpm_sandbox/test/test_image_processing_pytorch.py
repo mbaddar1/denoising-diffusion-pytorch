@@ -8,7 +8,7 @@ if __name__ == '__main__':
     """
     Load an mnist jpg image , normalize it , inverse normalize then re-save it 
     """
-    sample_image_file = "../mnist_image_samples/0/img_1.jpg"
+    sample_image_file = "../../mnist_image_samples/0/img_1.jpg"
     img = Image.open(sample_image_file)
     raw_img_data = np.array(img)
     img_size = 32

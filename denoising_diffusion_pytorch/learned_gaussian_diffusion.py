@@ -70,19 +70,19 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales, thres = 0.999):
 class LearnedGaussianDiffusion(GaussianDiffusion):
     def __init__(
         self,
-        model,
+        noise_model,
         vb_loss_weight = 0.001,  # lambda was 0.001 in the paper
         *args,
         **kwargs
     ):
-        super().__init__(model, *args, **kwargs)
-        assert model.out_dim == (model.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
-        assert not model.self_condition, 'not supported yet'
+        super().__init__(noise_model, *args, **kwargs)
+        assert noise_model.out_dim == (noise_model.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
+        assert not noise_model.self_condition, 'not supported yet'
 
         self.vb_loss_weight = vb_loss_weight
 
     def model_predictions(self, x, t, clip_x_start = False):
-        model_output = self.model(x, t)
+        model_output = self.noise_model(x, t)
         model_output, pred_variance = model_output.chunk(2, dim = 1)
 
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
@@ -100,7 +100,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         return ModelPrediction(pred_noise, x_start, pred_variance)
 
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None, **kwargs):
-        model_output = default(model_output, lambda: self.model(x, t))
+        model_output = default(model_output, lambda: self.noise_model(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
 
         min_log = extract(self.posterior_log_variance_clipped, t, x.shape)
@@ -119,13 +119,13 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         return model_mean, model_variance, model_log_variance, x_start
 
-    def p_losses(self, x_start, t, noise = None, clip_denoised = False):
+    def p_losses_images(self, x_start, t, noise = None, clip_denoised = False):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
         # model output
 
-        model_output = self.model(x_t, t)
+        model_output = self.noise_model(x_t, t)
 
         # calculating kl loss for learned variance (interpolation)
 
