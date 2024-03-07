@@ -43,7 +43,7 @@ def tensor_to_images(sample_tensor: torch.Tensor, dataset_name: str):
     elif dataset_name in GaussianDiffusion.SKLEARN_DATASET_NAMES:
         sample_tensor_np = sample_tensor.cpu().detach().numpy()
         plt.clf()
-        plt.scatter(sample_tensor_np[:,0], sample_tensor_np[:,1])
+        plt.scatter(sample_tensor_np[:, 0], sample_tensor_np[:, 1])
         out_filename = f"./generated_images/{dataset_name}.png"
         plt.savefig(out_filename)
         logger.info(f"Successfully written output file to {out_filename}")
@@ -52,7 +52,7 @@ def tensor_to_images(sample_tensor: torch.Tensor, dataset_name: str):
 
 
 if __name__ == '__main__':
-    time_steps = 50
+    time_steps = 1000
     device = torch.device('cuda')
     image_size = 32
     num_images = 1
@@ -60,11 +60,11 @@ if __name__ == '__main__':
     batch_size = 32
     # num_train_step = 20_000
     model_name = "ddpm_nn"
-    # dataset_name = "mnist8"
-    dataset_name = "circles"
+    dataset_name = "mnist8"
+    # dataset_name = "circles"
     model_checkpoint_ext = ".pt"
     checkpoint_metadata_ext = ".json"
-    diffusion_model_objective="pred_noise"
+    diffusion_model_objective = "pred_noise"
     model_checkpoints_path = f"../models/checkpoints/{model_name}_{dataset_name}"
     final_model_checkpoint_name = "checkpoint_model_5000.pt"
     final_model_path = os.path.join(model_checkpoints_path, final_model_checkpoint_name)
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     elif dataset_name == "circles":
         baseline_sinkhorn_value = 0.06
     elif dataset_name == "mnist6":
-        baseline_sinkhorn_value = 35 # just adhoc val. need to set it correctly
+        baseline_sinkhorn_value = 35  # just adhoc val. need to set it correctly
     else:
         raise ValueError(f"Still have no baseline sinkhorn distance for dataset_name = {dataset_name}")
     for iter_num in checkpoint_niters:
@@ -161,7 +161,6 @@ if __name__ == '__main__':
     plt.ylabel("EMA for L2 loss")
     plt.plot(x, y, label="loss vs iterations")
     plt.legend(loc="upper left")
-
     plt.savefig("iter_loss.png")
     logger.info(f"loading model weights from file {final_model_path}")
     diffusion_model.load_state_dict(torch.load(final_model_path))
@@ -169,10 +168,8 @@ if __name__ == '__main__':
     #
     logger.info("Sampling images")
     sampled_images = diffusion_model.sample(batch_size=sample_batch_size)
-    # FIXME No need now for this quantile analysis , remove it later
-    # quantiles = [0.0, 0.25, 0.5, 0.75, 1.0]
-    # logger.info(
-    #     f"quantiles of levels {quantiles} = {torch.quantile(input=sampled_images, q=torch.tensor(quantiles).to(device))}")
-    # logger.info(f"Average of the sampled images {torch.mean(sampled_images)}")
+    # FIXME No need now for this quantile analysis , remove it later quantiles = [0.0, 0.25, 0.5, 0.75,
+    #  1.0] logger.info( f"quantiles of levels {quantiles} = {torch.quantile(input=sampled_images, q=torch.tensor(
+    #  quantiles).to(device))}") logger.info(f"Average of the sampled images {torch.mean(sampled_images)}")
     tensor_to_images(sample_tensor=sampled_images, dataset_name=dataset_name)
     logger.info("Testing script finished")
